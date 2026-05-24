@@ -16,6 +16,7 @@ Esta carpeta contiene todos los archivos de la sesión.
 ## Archivos principales
 
 - `sesion2b_gestion_datos_policiales.qmd`: Documento principal en formato Quarto.
+- `sesion2b_gestion_datos_policiales`: Disponible en HTML y pdf.
 - `denuncias.csv`: Denuncias policiales.
 - `personal.csv`: Personal policial.
 - `parque.csv`: Parque automotor de la PNP.
@@ -23,7 +24,6 @@ Esta carpeta contiene todos los archivos de la sesión.
 - `infraestructura.xlsx`: Infraestructura de comisarias.
 - `comisarias_geo.csv`: Ubicacion de comisarias.
 - `comisarias_lima.sav`: Ejemplo de archivo SPSS.
-- `sesion2b_gestion_datos_policiales`: Disponible en HTML y pdf.
 
 ## Diccionarios
 
