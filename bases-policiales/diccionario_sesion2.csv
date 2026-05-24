@@ -1,0 +1,10 @@
+variable,tipo,descripcion
+ubigeo,character,Código de seis dígitos del distrito.
+llave_distrito,character,"Llave textual normalizada: departamento, provincia y distrito."
+dpto_hecho_new,character,Departamento donde ocurrió el hecho registrado.
+prov_hecho,character,Provincia donde ocurrió el hecho registrado.
+dist_hecho,character,Distrito donde ocurrió el hecho registrado.
+denuncias_2024_2026,numeric,Total de denuncias policiales entre 2024 y marzo de 2026.
+vehiculos_pnp,numeric,Total de vehículos PNP registrados en el distrito.
+vehiculos_operativos,numeric,Total de vehículos PNP operativos en el distrito.
+comisarias,integer,Número de comisarías identificadas en el distrito.

@@ -1,0 +1,1445 @@
+---
+title: "Gestión de bases de datos policiales"
+subtitle: "Importación, limpieza, diagnóstico, uniones y primeras visualizaciones"
+author: "Noam López Villanes"
+date: 2026-05-13
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    df-print: paged
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    prefer-html: true
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+## Objetivo de la sesión
+
+En esta sesión trabajaremos con bases reales de información policial. El objetivo no es hacer todavía un análisis estadístico complejo, sino aprender una ruta ordenada para gestionar bases de datos:
+
+1.  Importar archivos CSV, Excel y SPSS.
+2.  Revisar estructura, nombres de variables y tipos de datos.
+3.  Detectar valores perdidos, duplicados y problemas de codificación.
+4.  Estandarizar variables clave, especialmente `ubigeo`.
+5.  Crear indicadores simples mediante agrupaciones.
+6.  Fusionar bases de datos con `left_join()`.
+7.  Elaborar primeras visualizaciones exploratorias.
+
+## Preparación
+
+Si ejecutas este documento por partes, corre primero los chunks de **Instalar paquetes**, **Activar paquetes** y **Ubicar archivos**. Los tres están ocultos en el redenrizado final, pero esos bloques crean los paquetes, funciones y rutas que usan los demás chunks.
+
+
+```{r}
+#| include: false
+# INSTALAR PAQUETES:
+# Si los paquetes ya están instalados, R no vuelve a descargarlos. Automatiza la instalación.
+# No se renderiza en el documento final, pero es necesario para que los demás chunks funcionen sin errores.
+paquetes <- c(
+  # Manipulación, ordenamiento y visualización de datos.
+  "tidyverse",
+  # Importación de archivos Excel.
+  "readxl",
+  # Importación de archivos SPSS, Stata y SAS.
+  "haven",
+  # Limpieza de nombres de variables y tablas.
+  "janitor",
+  # Diagnóstico rápido de estructura y distribución de variables.
+  "skimr",
+  # Exploración de valores perdidos.
+  "naniar",
+  # Reportes exploratorios automáticos.
+  "DataExplorer",
+  # Rutas reproducibles dentro de proyectos.
+  "here",
+  # Formatos para ejes y etiquetas en gráficos.
+  "scales",
+  # Visualización interactiva.
+  "plotly"
+)
+
+# Identificamos qué paquetes faltan en la computadora.
+paquetes_faltantes <- paquetes[!paquetes %in% rownames(installed.packages())]
+
+if (length(paquetes_faltantes) > 0) {
+  # Instalamos solo los paquetes faltantes.
+  install.packages(
+    paquetes_faltantes,
+    repos = "https://packagemanager.posit.co/cran/latest"
+  )
+}
+```
+
+
+```{r}
+#| include: false
+# ACTIVAR PAQUETES:
+# Este bloque se ejecuta en segundo plano. No renderiza, pero debe correrse después de instalar los paquetes para cargar las funciones necesarias a usar
+library(tidyverse)
+library(readxl)
+library(haven)
+library(janitor)
+library(skimr)
+library(naniar)
+library(DataExplorer)
+library(here)
+library(scales)
+library(plotly)
+
+# Identifica la carpeta donde vive este QMD. Esto evita errores de rutas
+# cuando se ejecutan chunks desde otra carpeta de trabajo.
+resolver_ruta_sesion <- function() {
+  candidatos <- c(
+    getwd(),
+    if (
+      requireNamespace("rstudioapi", quietly = TRUE) &&
+        rstudioapi::isAvailable()
+    ) {
+      dirname(rstudioapi::getActiveDocumentContext()$path)
+    } else {
+      NA_character_
+    },
+    if (!is.null(knitr::current_input())) {
+      dirname(normalizePath(knitr::current_input(), mustWork = FALSE))
+    } else {
+      NA_character_
+    }
+  )
+
+  candidatos <- candidatos[!is.na(candidatos) & nzchar(candidatos)]
+  candidatos <- unique(normalizePath(candidatos, mustWork = FALSE))
+
+  ruta_valida <- candidatos[
+    file.exists(file.path(candidatos, "denuncias.csv"))
+  ]
+
+  if (length(ruta_valida) == 0) {
+    stop(
+      "No encuentro el archivo 'denuncias.csv'. ",
+      "Abre o ejecuta este QMD desde la carpeta de la Sesión 2P."
+    )
+  }
+
+  ruta_valida[1]
+}
+
+# Opciones generales para que las figuras salgan legibles en HTML.
+knitr::opts_chunk$set(
+  fig.width = 9.5,
+  fig.height = 6.2,
+  fig.align = "center",
+  fig.retina = 1,
+  dpi = 120
+)
+
+# Tema común para mantener un estilo visual consistente.
+tema_sesion <- function() {
+  theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(
+        size = 13,
+        hjust = 0.5,
+        margin = margin(b = 10)
+      ),
+      plot.margin = margin(t = 16, r = 24, b = 16, l = 24),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 9.5)
+    )
+}
+```
+
+
+
+```{r}
+#| include: false
+# UBICAR ARCHIVOS:
+# Los archivos de esta sesión están en la misma carpeta que este QMD.
+# Este chunk evita rutas largas y normaliza los nombres de los archivos, evitando tildes
+# De igual manera, no se renderiza nada en el documento final.
+# Recomendable cuando se tienen muchos archivos y se quiere conservar una estructura ordenada: un solo chunk para ubicar archivos, con funciones para normalizar nombres y formatos.
+ruta_sesion <- resolver_ruta_sesion()
+
+ruta_csv <- ruta_sesion
+ruta_diccionarios <- ruta_sesion
+ruta_infraestructura <- ruta_sesion
+ruta_comisarias <- ruta_sesion
+ruta_spss <- ruta_sesion
+ruta_resultados <- ruta_sesion
+
+# Revisamos qué archivos principales tenemos disponibles.
+list.files(ruta_sesion)
+
+cargar_datos_originales <- function() {
+  # Esta función carga las bases originales si todavía no existen en memoria.
+  if (!exists("denuncias", inherits = FALSE)) {
+    denuncias <<- read_csv(
+      file.path(ruta_csv, "denuncias.csv"),
+      locale = locale(encoding = "UTF-8"),
+      show_col_types = FALSE
+    )
+  }
+
+  if (!exists("personal", inherits = FALSE)) {
+    personal <<- read_csv(
+      file.path(ruta_csv, "personal.csv"),
+      locale = locale(encoding = "UTF-8"),
+      show_col_types = FALSE
+    )
+  }
+
+  if (!exists("parque", inherits = FALSE)) {
+    parque <<- read_csv(
+      file.path(ruta_csv, "parque.csv"),
+      locale = locale(encoding = "UTF-8"),
+      show_col_types = FALSE
+    )
+  }
+
+  if (!exists("infraestructura", inherits = FALSE)) {
+    infraestructura <<- read_excel(
+      file.path(
+        ruta_infraestructura,
+        "infraestructura.xlsx"
+      ),
+      sheet = "BD"
+    )
+  }
+
+  if (!exists("comisarias_lima_sav", inherits = FALSE)) {
+    comisarias_lima_sav <<- read_sav(
+      file.path(ruta_spss, "comisarias_lima.sav")
+    )
+  }
+
+  invisible(TRUE)
+}
+
+preparar_bases_limpias <- function() {
+  # Esta función crea versiones con nombres de variables estandarizados.
+  cargar_datos_originales()
+
+  denuncias_limpia <<- denuncias |> clean_names()
+  personal_limpia <<- personal |> clean_names()
+  parque_limpia <<- parque |> clean_names()
+  infraestructura_limpia <<- infraestructura |> clean_names()
+
+  invisible(TRUE)
+}
+
+formatear_ubigeo <- function(x) {
+  # Convertimos a texto y rellenamos con ceros a la izquierda.
+  x |>
+    as.character() |>
+    str_remove("\\.0$") |>
+    str_pad(width = 6, side = "left", pad = "0")
+}
+
+normalizar_texto <- function(x) {
+  # Quitamos tildes, pasamos a mayúsculas y homologamos nombres especiales.
+  x |>
+    as.character() |>
+    iconv(to = "ASCII//TRANSLIT") |>
+    str_to_upper() |>
+    str_squish() |>
+    str_replace_all("^LIMA METROPOLITANA$", "LIMA") |>
+    str_replace_all("^PROV\\. CONST\\. DEL CALLAO$", "CALLAO")
+}
+
+preparar_bases_trabajo <- function() {
+  # Esta función agrega variables necesarias para análisis y fusiones.
+  preparar_bases_limpias()
+
+  denuncias_limpia <<- denuncias_limpia |>
+    mutate(
+      ubigeo = formatear_ubigeo(ubigeo_hecho),
+      llave_distrito = paste(
+        normalizar_texto(dpto_hecho_new),
+        normalizar_texto(prov_hecho),
+        normalizar_texto(dist_hecho),
+        sep = "|"
+      ),
+      anio = as.integer(anio),
+      mes = as.integer(mes),
+      cantidad = as.numeric(cantidad)
+    )
+
+  parque_limpia <<- parque_limpia |>
+    mutate(
+      ubigeo = formatear_ubigeo(ubigeo),
+      cantidad = as.numeric(cantidad)
+    )
+
+  invisible(TRUE)
+}
+
+preparar_fusiones <- function() {
+  # Esta función prepara las tablas agregadas y la base integrada.
+  preparar_bases_trabajo()
+
+  denuncias_distrito <<- denuncias_limpia |>
+    filter(anio >= 2024) |>
+    group_by(ubigeo, llave_distrito, dpto_hecho_new, prov_hecho, dist_hecho) |>
+    summarise(
+      denuncias_2024_2026 = sum(cantidad, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  parque_distrito <<- parque_limpia |>
+    group_by(ubigeo, nombdepto, nombprov, nombdist) |>
+    summarise(
+      vehiculos_pnp = sum(cantidad, na.rm = TRUE),
+      vehiculos_operativos = sum(cantidad[estado == "OPERATIVO"], na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  comisarias_geo <<- read_csv(
+    file.path(ruta_comisarias, "comisarias_geo.csv"),
+    show_col_types = FALSE
+  ) |>
+    mutate(
+      llave_distrito = paste(
+        normalizar_texto(departamen),
+        normalizar_texto(provincia),
+        normalizar_texto(distrito),
+        sep = "|"
+      )
+    )
+
+  comisarias_distrito <<- comisarias_geo |>
+    group_by(llave_distrito) |>
+    summarise(
+      comisarias = n_distinct(cod_cpnp),
+      .groups = "drop"
+    )
+
+  base_distrital <<- denuncias_distrito |>
+    left_join(
+      parque_distrito |> select(ubigeo, vehiculos_pnp, vehiculos_operativos),
+      by = "ubigeo"
+    ) |>
+    left_join(comisarias_distrito, by = "llave_distrito") |>
+    mutate(
+      vehiculos_pnp = replace_na(vehiculos_pnp, 0),
+      vehiculos_operativos = replace_na(vehiculos_operativos, 0),
+      comisarias = replace_na(comisarias, 0)
+    )
+
+  invisible(TRUE)
+}
+```
+
+## Importación
+
+### CSV: denuncias policiales
+
+La base de denuncias policiales contiene registros agregados por período, lugar y modalidad.
+
+```{r}
+cargar_datos_originales()
+
+denuncias <- read_csv(
+  # read_csv() importa archivos separados por comas.
+  file.path(ruta_csv, "denuncias.csv"),
+  locale = locale(encoding = "UTF-8"),
+  show_col_types = FALSE
+)
+
+# glimpse() muestra columnas, tipos y algunos valores de ejemplo.
+glimpse(denuncias)
+```
+
+### CSV: personal policial
+
+```{r}
+cargar_datos_originales()
+
+personal <- read_csv(
+  # La codificación UTF-8 permite leer correctamente tildes y eñes.
+  file.path(ruta_csv, "personal.csv"),
+  locale = locale(encoding = "UTF-8"),
+  show_col_types = FALSE
+)
+
+glimpse(personal)
+```
+
+### CSV: parque automotor de la PNP
+
+```{r}
+cargar_datos_originales()
+
+parque <- read_csv(
+  # Importamos el parque automotor como tabla de trabajo.
+  file.path(ruta_csv, "parque.csv"),
+  locale = locale(encoding = "UTF-8"),
+  show_col_types = FALSE
+)
+
+glimpse(parque)
+```
+
+### Excel: infraestructura de comisarías
+
+```{r}
+cargar_datos_originales()
+
+infraestructura <- read_excel(
+  # read_excel() permite indicar archivo y hoja.
+  file.path(
+    ruta_infraestructura,
+    "infraestructura.xlsx"
+  ),
+  sheet = "BD"
+)
+
+glimpse(infraestructura)
+```
+
+### SPSS: ejemplo de importación
+
+No usaremos esta base para todo el ejercicio, pero sirve para mostrar cómo importar archivos `.sav`.
+
+```{r}
+cargar_datos_originales()
+
+comisarias_lima_sav <- read_sav(
+  # read_sav() importa archivos de SPSS.
+  file.path(ruta_spss, "comisarias_lima.sav")
+)
+
+glimpse(comisarias_lima_sav)
+```
+
+## Primer diagnóstico
+
+### Cuántas filas y columnas tiene cada base
+
+```{r}
+cargar_datos_originales()
+
+resumen_bases <- tibble(
+  # Creamos una tabla resumen con tamaño de cada base.
+  base = c(
+    "denuncias",
+    "personal",
+    "parque",
+    "infraestructura",
+    "comisarias_lima_sav"
+  ),
+  filas = c(
+    nrow(denuncias),
+    nrow(personal),
+    nrow(parque),
+    nrow(infraestructura),
+    nrow(comisarias_lima_sav)
+  ),
+  columnas = c(
+    ncol(denuncias),
+    ncol(personal),
+    ncol(parque),
+    ncol(infraestructura),
+    ncol(comisarias_lima_sav)
+  )
+)
+
+resumen_bases
+```
+
+La base de denuncias es la de mayor tamaño y será nuestra fuente principal para practicar agregaciones, limpieza y fusiones. Las otras bases funcionan como insumos complementarios para cruzar recursos policiales e infraestructura.
+
+### Estandarizar nombres de variables
+
+Trabajar con nombres en mayúsculas, espacios, tildes o saltos de línea puede ser incómodo. `janitor::clean_names()` ayuda a convertirlos en nombres más consistentes.
+
+```{r}
+preparar_bases_limpias()
+
+# Revisamos cómo quedaron los nombres después de clean_names().
+names(denuncias_limpia)
+names(personal_limpia)
+names(parque_limpia)
+names(infraestructura_limpia)
+```
+
+Después de `clean_names()`, los nombres quedan en minúsculas y sin espacios, lo que reduce errores al escribir código y facilita el uso de `select()`, `mutate()` y `group_by()`.
+
+## Valores perdidos
+
+### Conteo de valores perdidos por variable
+
+```{r}
+preparar_bases_limpias()
+
+faltantes_denuncias <- denuncias_limpia |>
+  # Contamos cuántos NA tiene cada columna.
+  summarise(across(everything(), ~ sum(is.na(.x)))) |>
+  # Pasamos de muchas columnas a dos: variable y número de faltantes.
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "n_faltantes"
+  ) |>
+  mutate(pct_faltantes = n_faltantes / nrow(denuncias_limpia)) |>
+  arrange(desc(n_faltantes))
+
+faltantes_denuncias
+```
+
+En esta base no solo interesa saber si hay valores perdidos, sino también en qué variables se concentran. Si los faltantes aparecen en una llave, como `ubigeo`, afectan directamente las fusiones posteriores.
+
+### Visualizar valores perdidos
+
+```{r}
+#| fig-height: 3.2
+if (sum(faltantes_denuncias$n_faltantes) == 0) {
+  ggplot() +
+    annotate(
+      "text",
+      x = 0.5,
+      y = 0.5,
+      label = "No se observan valores perdidos",
+      size = 5
+    ) +
+    labs(title = "Valores perdidos en denuncias policiales") +
+    theme_void(base_size = 11) +
+    theme(
+      plot.title = element_text(
+        size = 13,
+        hjust = 0.5,
+        margin = margin(b = 10)
+      ),
+      plot.margin = margin(t = 16, r = 24, b = 16, l = 24)
+    )
+} else {
+  limite_faltantes_denuncias <- max(faltantes_denuncias$pct_faltantes, 0.01)
+
+  faltantes_denuncias |>
+    filter(n_faltantes > 0) |>
+    mutate(variable = fct_reorder(variable, pct_faltantes)) |>
+    ggplot(aes(x = pct_faltantes, y = variable)) +
+    geom_col(fill = "#8a817c") +
+    scale_x_continuous(
+      labels = percent_format(accuracy = 0.1),
+      limits = c(0, limite_faltantes_denuncias),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    scale_y_discrete(labels = label_wrap(28)) +
+    labs(
+      title = "Valores perdidos en denuncias policiales",
+      x = "% de filas con valor perdido",
+      y = NULL
+    ) +
+    tema_sesion()
+}
+```
+
+El gráfico resume si hay campos incompletos. Cuando no aparecen faltantes, igualmente conviene mostrarlo: también es un hallazgo de calidad de datos.
+
+```{r}
+#| fig-height: 3.8
+preparar_bases_limpias()
+
+faltantes_personal <- personal_limpia |>
+  # Repetimos el diagnóstico para la base de personal policial.
+  summarise(across(everything(), ~ sum(is.na(.x)))) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "n_faltantes"
+  ) |>
+  mutate(pct_faltantes = n_faltantes / nrow(personal_limpia)) |>
+  arrange(desc(n_faltantes))
+
+if (sum(faltantes_personal$n_faltantes) == 0) {
+  ggplot() +
+    annotate(
+      "text",
+      x = 0.5,
+      y = 0.5,
+      label = "No se observan valores perdidos",
+      size = 5
+    ) +
+    labs(title = "Valores perdidos en personal policial") +
+    theme_void(base_size = 11) +
+    theme(
+      plot.title = element_text(
+        size = 13,
+        hjust = 0.5,
+        margin = margin(b = 10)
+      ),
+      plot.margin = margin(t = 16, r = 24, b = 16, l = 24)
+    )
+} else {
+  limite_faltantes_personal <- max(faltantes_personal$pct_faltantes, 0.01)
+
+  faltantes_personal |>
+    filter(n_faltantes > 0) |>
+    mutate(variable = fct_reorder(variable, pct_faltantes)) |>
+    ggplot(aes(x = pct_faltantes, y = variable)) +
+    geom_col(fill = "#6b705c") +
+    scale_x_continuous(
+      labels = percent_format(accuracy = 0.1),
+      limits = c(0, limite_faltantes_personal),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    scale_y_discrete(labels = label_wrap(28)) +
+    labs(
+      title = "Valores perdidos en personal policial",
+      x = "% de filas con valor perdido",
+      y = NULL
+    ) +
+    tema_sesion()
+}
+```
+
+En personal policial sí aparecen faltantes en algunas variables administrativas. Esto no impide usar la base, pero alerta sobre campos que podrían requerir revisión antes de análisis más finos.
+
+## Duplicados
+
+Un duplicado puede ser una fila totalmente repetida o una repetición según variables clave. Siempre debemos definir qué significa "duplicado" según la base.
+
+### Filas totalmente duplicadas
+
+```{r}
+preparar_bases_limpias()
+
+tibble(
+  # Comparamos filas totales con filas únicas.
+  base = c("denuncias", "personal", "parque", "infraestructura"),
+  filas = c(
+    nrow(denuncias_limpia),
+    nrow(personal_limpia),
+    nrow(parque_limpia),
+    nrow(infraestructura_limpia)
+  ),
+  filas_unicas = c(
+    nrow(distinct(denuncias_limpia)),
+    nrow(distinct(personal_limpia)),
+    nrow(distinct(parque_limpia)),
+    nrow(distinct(infraestructura_limpia))
+  )
+) |>
+  mutate(duplicados_exactos = filas - filas_unicas)
+```
+
+Comparar filas totales y filas únicas permite detectar duplicados exactos. Si aparecen, el siguiente paso no es borrar automáticamente, sino verificar si el duplicado representa un error o una repetición válida de la fuente.
+
+### Duplicados según llaves sustantivas
+
+En denuncias, una llave razonable puede ser año, mes, ubigeo y modalidad.
+
+```{r}
+preparar_bases_limpias()
+
+denuncias_duplicadas_clave <- denuncias_limpia |>
+  # count() cuenta repeticiones por la llave que definimos.
+  count(anio, mes, ubigeo_hecho, p_modalidades, name = "n") |>
+  filter(n > 1) |>
+  arrange(desc(n))
+
+denuncias_duplicadas_clave
+```
+
+Aquí revisamos duplicados con una llave sustantiva. Esta mirada es más útil que buscar filas idénticas, porque pregunta si una misma combinación de año, mes, distrito y modalidad aparece más de una vez.
+
+## Codificación y caracteres extraños
+
+Algunas bases públicas pueden venir con problemas de codificación. Un primer síntoma son caracteres como `�`.
+
+```{r}
+cargar_datos_originales()
+
+trata_utf8 <- read_csv(
+  # Primero intentamos leer con UTF-8.
+  file.path(ruta_csv, "trata.csv"),
+  locale = locale(encoding = "UTF-8"),
+  show_col_types = FALSE
+)
+
+names(trata_utf8)
+```
+
+Si vemos caracteres como `�`, probablemente la base fue guardada con otra codificación. Es una señal de alerta antes de limpiar nombres o analizar categorías de texto.
+
+Si los nombres o valores aparecen con caracteres extraños, podemos probar otra codificación.
+
+```{r}
+trata_latin1 <- read_csv(
+  # Si aparecen caracteres extraños, probamos Latin1.
+  file.path(ruta_csv, "trata.csv"),
+  locale = locale(encoding = "Latin1"),
+  show_col_types = FALSE
+) |>
+  clean_names()
+
+names(trata_latin1)
+
+trata_latin1 |>
+  select(1:8) |>
+  head()
+```
+
+Al leer con `Latin1`, los nombres y categorías pueden recuperarse mejor. Este tipo de prueba es importante cuando trabajamos con bases públicas descargadas de distintas plataformas.
+
+## Estandarización de ubigeo
+
+El `ubigeo` debe tratarse como texto, no como número. Si se lee como número, se pueden perder ceros a la izquierda.
+
+```{r}
+preparar_bases_limpias()
+
+tibble(
+  # Estos casos muestran por qué el ubigeo debe trabajarse como texto.
+  ubigeo_original = c(10101, "150101", "70101.0", NA)
+) |>
+  mutate(ubigeo_estandar = formatear_ubigeo(ubigeo_original))
+```
+
+```{r}
+preparar_bases_trabajo()
+
+denuncias_limpia |>
+  count(ubigeo, sort = TRUE) |>
+  head()
+```
+
+El `ubigeo` se transforma a texto para conservar ceros a la izquierda. Esta decisión parece pequeña, pero es central: si el código se trata como número, varias fusiones pueden fallar silenciosamente.
+
+### Verificar ubicaciones sin ubigeo
+
+```{r}
+preparar_bases_trabajo()
+
+denuncias_limpia |>
+  # Buscamos registros sin ubigeo válido.
+  filter(is.na(ubigeo) | ubigeo == "000000") |>
+  count(dpto_hecho_new, prov_hecho, dist_hecho, sort = TRUE)
+```
+
+Si esta tabla devuelve registros, habría que revisar esos casos antes de fusionar. Un distrito sin ubigeo puede quedar fuera de cruces con parque automotor, comisarías u otras bases territoriales.
+
+## Primeras transformaciones
+
+### Total de denuncias por año
+
+```{r}
+preparar_bases_trabajo()
+
+denuncias_anio <- denuncias_limpia |>
+  # Agrupamos por año y sumamos el número de denuncias.
+  group_by(anio) |>
+  summarise(
+    denuncias = sum(cantidad, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+denuncias_anio
+```
+
+Esta agregación permite observar la serie anual de denuncias. El año 2026 debe interpretarse con cuidado porque la base llega solo hasta marzo, no al año completo.
+
+```{r}
+ggplot(denuncias_anio, aes(x = anio, y = denuncias)) +
+  geom_line(linewidth = 1, color = "#2f6f73") +
+  geom_point(size = 2, color = "#2f6f73") +
+  scale_x_continuous(breaks = denuncias_anio$anio) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0.04, 0.08))) +
+  labs(
+    title = "Denuncias policiales por año",
+    x = NULL,
+    y = "Denuncias"
+  ) +
+  tema_sesion()
+```
+
+La caída de 2026 no debe leerse como reducción anual del delito: responde a que el año está incompleto. Este es un buen ejemplo de por qué siempre se revisa la fecha de corte.
+
+### Principales modalidades
+
+```{r}
+preparar_bases_limpias()
+
+modalidades_top <- denuncias_limpia |>
+  # Agrupamos por modalidad y conservamos las principales categorías.
+  group_by(p_modalidades) |>
+  summarise(
+    denuncias = sum(cantidad, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  slice_max(denuncias, n = 12) |>
+  mutate(p_modalidades = fct_reorder(p_modalidades, denuncias))
+
+modalidades_top
+```
+
+Las modalidades muestran que no todos los registros tienen el mismo peso analítico. Algunas categorías amplias, como “Otros”, pueden necesitar desagregación o discusión metodológica.
+
+```{r}
+ggplot(modalidades_top, aes(x = denuncias, y = p_modalidades)) +
+  geom_col(fill = "#8a5a44") +
+  scale_x_continuous(labels = comma, expand = expansion(mult = c(0, 0.06))) +
+  scale_y_discrete(labels = label_wrap(32)) +
+  labs(
+    title = "Principales modalidades registradas",
+    x = "Denuncias",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+El gráfico ayuda a priorizar categorías para análisis posteriores. También muestra cuándo una categoría residual concentra demasiados casos y puede ocultar heterogeneidad.
+
+### Personal policial por departamento
+
+```{r}
+preparar_bases_limpias()
+
+personal_departamento <- personal_limpia |>
+  # Sumamos efectivos por departamento.
+  group_by(departamento) |>
+  summarise(
+    efectivos = sum(cantidad, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(efectivos))
+
+personal_departamento
+```
+
+Esta tabla resume la distribución territorial del personal. Para interpretarla mejor, luego podría cruzarse con población, denuncias o número de comisarías.
+
+```{r}
+personal_departamento |>
+  slice_max(efectivos, n = 12) |>
+  mutate(departamento = fct_reorder(departamento, efectivos)) |>
+  ggplot(aes(x = efectivos, y = departamento)) +
+  geom_col(fill = "#3d5a80") +
+  scale_x_continuous(labels = comma, expand = expansion(mult = c(0, 0.06))) +
+  scale_y_discrete(labels = label_wrap(24)) +
+  labs(
+    title = "Departamentos con mayor cantidad de personal policial",
+    x = "Efectivos",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+Lima Metropolitana concentra una parte importante del personal policial. Esto no necesariamente implica mayor cobertura relativa: para eso necesitaríamos tasas o indicadores por población.
+
+### Estado del parque automotor
+
+```{r}
+preparar_bases_trabajo()
+
+parque_estado <- parque_limpia |>
+  # Sumamos vehículos según su estado operativo.
+  group_by(estado) |>
+  summarise(
+    vehiculos = sum(cantidad, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(vehiculos))
+
+parque_estado
+```
+
+El estado del parque automotor permite distinguir recursos disponibles de recursos registrados. Para gestión pública, la diferencia entre operativo e inoperativo es sustantiva.
+
+```{r}
+ggplot(parque_estado, aes(x = fct_reorder(estado, vehiculos), y = vehiculos)) +
+  geom_col(fill = "#627264") +
+  coord_flip() +
+  scale_x_discrete(labels = label_wrap(26)) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.06))) +
+  labs(
+    title = "Parque automotor de la PNP según estado",
+    x = NULL,
+    y = "Vehículos"
+  ) +
+  tema_sesion()
+```
+
+Esta visualización permite ver rápidamente la composición del parque automotor. Si una proporción alta está inoperativa, el total de vehículos puede sobreestimar la capacidad real.
+
+## Fusionar bases de datos
+
+Para unir bases necesitamos una llave común. En este ejercicio usaremos `ubigeo`.
+
+### Preparar denuncias por distrito
+
+```{r}
+preparar_bases_trabajo()
+
+denuncias_distrito <- denuncias_limpia |>
+  # Nos quedamos con los años recientes para el ejercicio de fusión.
+  filter(anio >= 2024) |>
+  group_by(ubigeo, llave_distrito, dpto_hecho_new, prov_hecho, dist_hecho) |>
+  summarise(
+    denuncias_2024_2026 = sum(cantidad, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+denuncias_distrito
+```
+
+Al agregar por distrito pasamos de una base de eventos agregados por modalidad y mes a una base territorial. Esta será la unidad que usaremos para cruzar información con recursos policiales.
+
+### Preparar parque automotor por distrito
+
+```{r}
+preparar_bases_trabajo()
+
+parque_distrito <- parque_limpia |>
+  # Agregamos vehículos por distrito antes de unir.
+  group_by(ubigeo, nombdepto, nombprov, nombdist) |>
+  summarise(
+    vehiculos_pnp = sum(cantidad, na.rm = TRUE),
+    vehiculos_operativos = sum(cantidad[estado == "OPERATIVO"], na.rm = TRUE),
+    .groups = "drop"
+  )
+
+parque_distrito
+```
+
+El parque automotor se resume por distrito para que tenga la misma unidad de análisis que las denuncias. Antes de fusionar, cada base debe estar al mismo nivel de agregación.
+
+### Leer ubicación de comisarías 2024
+
+La hoja `CPNP_GEO` tiene información georreferenciada de comisarías. En esta versión, el campo `cod_inei` no corresponde al ubigeo completo de seis dígitos; por eso construiremos una llave textual con departamento, provincia y distrito.
+
+```{r}
+preparar_bases_trabajo()
+
+comisarias_geo <- read_csv(
+  # Leemos la base ligera con ubicación de comisarías.
+  file.path(ruta_comisarias, "comisarias_geo.csv"),
+  show_col_types = FALSE
+) |>
+  mutate(
+    llave_distrito = paste(
+      normalizar_texto(departamen),
+      normalizar_texto(provincia),
+      normalizar_texto(distrito),
+      sep = "|"
+    )
+  )
+
+glimpse(comisarias_geo)
+```
+
+Esta base aporta ubicación de comisarías, pero su código `cod_inei` no es directamente comparable con el `ubigeo`. Por eso usamos una llave textual normalizada como solución práctica para la sesión.
+
+```{r}
+if (!exists("comisarias_geo")) {
+  preparar_fusiones()
+}
+
+comisarias_distrito <- comisarias_geo |>
+  # Contamos comisarías únicas por distrito normalizado.
+  group_by(llave_distrito) |>
+  summarise(
+    comisarias = n_distinct(cod_cpnp),
+    .groups = "drop"
+  )
+
+comisarias_distrito
+```
+
+Contar comisarías por distrito permite pasar de una base de establecimientos a un indicador territorial comparable con denuncias y vehículos.
+
+### Hacer el join
+
+```{r}
+preparar_fusiones()
+
+base_distrital <- denuncias_distrito |>
+  # left_join() conserva todos los distritos de denuncias.
+  left_join(
+    parque_distrito |> select(ubigeo, vehiculos_pnp, vehiculos_operativos),
+    by = "ubigeo"
+  ) |>
+  # Usamos llave textual porque el código INEI de comisarías no es ubigeo completo.
+  left_join(comisarias_distrito, by = "llave_distrito") |>
+  mutate(
+    # Si no hubo cruce, asumimos cero recursos registrados en esta base.
+    vehiculos_pnp = replace_na(vehiculos_pnp, 0),
+    vehiculos_operativos = replace_na(vehiculos_operativos, 0),
+    comisarias = replace_na(comisarias, 0)
+  )
+
+base_distrital
+```
+
+La base integrada conserva todos los distritos con denuncias recientes y agrega, cuando existe cruce, información de vehículos y comisarías. Los ceros deben interpretarse como “sin registro cruzado en estas bases”, no necesariamente como ausencia real.
+
+### Revisar el resultado del join
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+base_distrital |>
+  summarise(
+    distritos = n(),
+    distritos_con_vehiculos = sum(vehiculos_pnp > 0),
+    distritos_con_comisarias = sum(comisarias > 0),
+    denuncias_total = sum(denuncias_2024_2026, na.rm = TRUE)
+  )
+```
+
+Este resumen muestra la cobertura del cruce: cuántos distritos tienen información complementaria de vehículos o comisarías y cuántas denuncias acumula la base final.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+base_distrital |>
+  arrange(desc(denuncias_2024_2026)) |>
+  select(
+    dpto_hecho_new,
+    prov_hecho,
+    dist_hecho,
+    denuncias_2024_2026,
+    vehiculos_pnp,
+    comisarias
+  ) |>
+  head(20)
+```
+
+Revisar los distritos con más denuncias permite detectar casos influyentes y decidir si conviene analizarlos por separado, especialmente cuando hay grandes ciudades o distritos capitales.
+
+### Visualizar relación entre denuncias y recursos
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+base_distrital |>
+  filter(vehiculos_pnp > 0) |>
+  ggplot(aes(x = vehiculos_pnp, y = denuncias_2024_2026)) +
+  geom_point(alpha = 0.45, color = "#6c584c", size = 2) +
+  scale_x_continuous(labels = comma, expand = expansion(mult = c(0.03, 0.08))) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0.03, 0.08))) +
+  labs(
+    title = "Denuncias y vehículos PNP por distrito",
+    x = "Vehículos PNP",
+    y = "Denuncias 2024-2026"
+  ) +
+  tema_sesion()
+```
+
+La relación entre denuncias y vehículos no debe interpretarse causalmente. En esta etapa solo exploramos si hay patrones, concentraciones o valores extremos que merezcan revisión.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+base_distrital |>
+  filter(comisarias > 0) |>
+  ggplot(aes(x = comisarias, y = denuncias_2024_2026)) +
+  geom_jitter(
+    width = 0.12,
+    height = 0,
+    alpha = 0.45,
+    color = "#2f4858",
+    size = 2
+  ) +
+  scale_x_continuous(
+    breaks = pretty_breaks(),
+    expand = expansion(mult = c(0.08, 0.12))
+  ) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0.03, 0.08))) +
+  labs(
+    title = "Denuncias y número de comisarías por distrito",
+    x = "Comisarías",
+    y = "Denuncias 2024-2026"
+  ) +
+  tema_sesion()
+```
+
+Los distritos con más comisarías tienden a ser territorios urbanos o con mayor actividad policial registrada. Esta relación requiere contexto territorial antes de extraer conclusiones.
+
+## Documentar y validar la base
+
+Antes de exportar una base limpia conviene dejar evidencia de cuatro cosas: de dónde vienen los datos, qué reglas de calidad aplicamos, qué tan bien cruzaron las bases y si necesitamos cambiar la forma de la tabla para analizarla mejor.
+
+### Diccionario mínimo de datos
+
+Un diccionario no tiene que ser largo para ser útil. En una primera versión basta con identificar la fuente, la unidad de análisis y el papel de cada variable.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+diccionario_base_distrital <- tibble(
+  # Documentamos variables, tipos y significado.
+  variable = names(base_distrital),
+  tipo = map_chr(base_distrital, ~ class(.x)[1]),
+  descripcion = case_when(
+    variable == "ubigeo" ~ "Código de seis dígitos del distrito.",
+    variable ==
+      "llave_distrito" ~ "Llave textual normalizada: departamento, provincia y distrito.",
+    variable ==
+      "dpto_hecho_new" ~ "Departamento donde ocurrió el hecho registrado.",
+    variable == "prov_hecho" ~ "Provincia donde ocurrió el hecho registrado.",
+    variable == "dist_hecho" ~ "Distrito donde ocurrió el hecho registrado.",
+    variable ==
+      "denuncias_2024_2026" ~ "Total de denuncias policiales entre 2024 y marzo de 2026.",
+    variable ==
+      "vehiculos_pnp" ~ "Total de vehículos PNP registrados en el distrito.",
+    variable ==
+      "vehiculos_operativos" ~ "Total de vehículos PNP operativos en el distrito.",
+    variable ==
+      "comisarias" ~ "Número de comisarías identificadas en el distrito.",
+    TRUE ~ "Variable auxiliar o proveniente de la fuente original."
+  )
+)
+
+diccionario_base_distrital
+```
+
+El diccionario hace explícito qué significa cada variable. Esto es especialmente importante cuando una base será compartida o reutilizada en otra sesión.
+
+También es útil registrar una ficha breve de trazabilidad de las bases utilizadas.
+
+```{r}
+trazabilidad <- tibble(
+  # Esta ficha permite recordar fuente, unidad y uso de cada archivo.
+  base = c(
+    "Denuncias policiales",
+    "Parque automotor PNP",
+    "Comisarías georreferenciadas"
+  ),
+  archivo = c(
+    "denuncias.csv",
+    "parque.csv",
+    "Información policial_BDs_seguridad_24.xlsx"
+  ),
+  unidad_original = c(
+    "Año, mes, distrito y modalidad",
+    "Distrito, tipo de vehículo, estado y procedencia",
+    "Comisaría"
+  ),
+  uso_en_la_sesion = c(
+    "Construir denuncias acumuladas por distrito",
+    "Agregar vehículos por distrito",
+    "Contar comisarías por distrito"
+  )
+)
+
+trazabilidad
+```
+
+La trazabilidad permite reconstruir de dónde salió cada indicador. En análisis aplicado, esto ayuda a evitar confundir fuentes, fechas de corte o unidades de análisis.
+
+### Reglas de calidad
+
+Las reglas de calidad son pruebas simples que nos avisan si algo no cuadra. No reemplazan el criterio sustantivo, pero ayudan a detectar errores temprano.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+validaciones <- tibble(
+  # Cada regla cuenta cuántos registros incumplen una condición básica.
+  regla = c(
+    "El ubigeo debe tener seis dígitos",
+    "Las denuncias no pueden ser negativas",
+    "Los vehículos no pueden ser negativos",
+    "Los vehículos operativos no pueden superar el total de vehículos",
+    "El número de comisarías no puede ser negativo"
+  ),
+  registros_con_problema = c(
+    sum(!str_detect(base_distrital$ubigeo, "^\\d{6}$"), na.rm = TRUE),
+    sum(base_distrital$denuncias_2024_2026 < 0, na.rm = TRUE),
+    sum(base_distrital$vehiculos_pnp < 0, na.rm = TRUE),
+    sum(
+      base_distrital$vehiculos_operativos > base_distrital$vehiculos_pnp,
+      na.rm = TRUE
+    ),
+    sum(base_distrital$comisarias < 0, na.rm = TRUE)
+  )
+)
+
+validaciones
+```
+
+Si una regla devuelve cero problemas, no significa que la base sea perfecta, pero sí que pasó controles básicos de consistencia. Si devuelve casos, esos registros deben revisarse antes de exportar.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+base_distrital |>
+  filter(
+    !str_detect(ubigeo, "^\\d{6}$") |
+      denuncias_2024_2026 < 0 |
+      vehiculos_pnp < 0 |
+      vehiculos_operativos > vehiculos_pnp |
+      comisarias < 0
+  )
+```
+
+Esta tabla lista los registros que incumplen alguna regla de calidad. Si queda vacía, las reglas definidas no encontraron problemas.
+
+### Diagnóstico de fusiones
+
+No basta con hacer un `left_join()`. También debemos revisar qué registros cruzaron y cuáles quedaron fuera.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+parque_sin_denuncias <- parque_distrito |>
+  # anti_join() devuelve registros del primer objeto que no cruzan con el segundo.
+  anti_join(denuncias_distrito, by = "ubigeo")
+
+denuncias_sin_parque <- denuncias_distrito |>
+  anti_join(parque_distrito, by = "ubigeo")
+
+comisarias_sin_denuncias <- comisarias_distrito |>
+  anti_join(denuncias_distrito, by = "llave_distrito")
+
+diagnostico_fusiones <- tibble(
+  revision = c(
+    "Distritos en parque automotor sin denuncias",
+    "Distritos en denuncias sin parque automotor",
+    "Distritos con comisarías sin denuncias"
+  ),
+  registros = c(
+    nrow(parque_sin_denuncias),
+    nrow(denuncias_sin_parque),
+    nrow(comisarias_sin_denuncias)
+  )
+)
+
+diagnostico_fusiones
+```
+
+El diagnóstico de fusiones muestra dónde se pierde correspondencia entre bases. Esta revisión es tan importante como el `left_join()`, porque revela límites del cruce.
+
+```{r}
+denuncias_sin_parque |>
+  arrange(desc(denuncias_2024_2026)) |>
+  select(dpto_hecho_new, prov_hecho, dist_hecho, denuncias_2024_2026) |>
+  head(15)
+```
+
+Estos son distritos con denuncias, pero sin parque automotor cruzado por `ubigeo`. Puede deberse a ausencia real de registro o a diferencias en la codificación territorial.
+
+### Reestructurar datos: largo y ancho
+
+Muchas bases se analizan mejor en formato largo: una fila por unidad y por indicador. Para reportes, a veces conviene volver a formato ancho.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+base_indicadores_larga <- base_distrital |>
+  # El formato largo facilita comparar varios indicadores con una misma estructura.
+  select(
+    ubigeo,
+    dpto_hecho_new,
+    prov_hecho,
+    dist_hecho,
+    denuncias_2024_2026,
+    vehiculos_pnp,
+    vehiculos_operativos,
+    comisarias
+  ) |>
+  pivot_longer(
+    cols = c(
+      denuncias_2024_2026,
+      vehiculos_pnp,
+      vehiculos_operativos,
+      comisarias
+    ),
+    names_to = "indicador",
+    values_to = "valor"
+  )
+
+base_indicadores_larga
+```
+
+El formato largo es útil para comparar indicadores en un mismo campo (`indicador`) y facilita gráficos o resúmenes automatizados.
+
+```{r}
+base_indicadores_larga |>
+  group_by(indicador) |>
+  summarise(
+    minimo = min(valor, na.rm = TRUE),
+    mediana = median(valor, na.rm = TRUE),
+    promedio = mean(valor, na.rm = TRUE),
+    maximo = max(valor, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+Este resumen permite detectar escalas muy distintas entre indicadores. Por ejemplo, denuncias, vehículos y comisarías no tienen magnitudes comparables sin estandarización.
+
+```{r}
+base_indicadores_ancha <- base_indicadores_larga |>
+  # Volvemos al formato ancho cuando queremos una columna por indicador.
+  pivot_wider(
+    names_from = indicador,
+    values_from = valor
+  )
+
+base_indicadores_ancha
+```
+
+El formato ancho es más cómodo para revisar una base final por distrito, mientras que el formato largo suele ser mejor para visualización y modelamiento.
+
+## Exportar una base limpia
+
+Guardamos en esta misma carpeta la base distrital construida, su diccionario mínimo y la tabla en formato largo.
+
+```{r}
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+if (!exists("diccionario_base_distrital")) {
+  diccionario_base_distrital <- tibble(
+    variable = names(base_distrital),
+    tipo = map_chr(base_distrital, ~ class(.x)[1]),
+    descripcion = "Variable de la base distrital integrada."
+  )
+}
+
+if (!exists("base_indicadores_larga")) {
+  base_indicadores_larga <- base_distrital |>
+    select(
+      ubigeo,
+      dpto_hecho_new,
+      prov_hecho,
+      dist_hecho,
+      denuncias_2024_2026,
+      vehiculos_pnp,
+      vehiculos_operativos,
+      comisarias
+    ) |>
+    pivot_longer(
+      cols = c(
+        denuncias_2024_2026,
+        vehiculos_pnp,
+        vehiculos_operativos,
+        comisarias
+      ),
+      names_to = "indicador",
+      values_to = "valor"
+    )
+}
+
+write_csv(
+  # Exportamos la base integrada principal.
+  base_distrital,
+  file.path(ruta_resultados, "base_sesion2.csv")
+)
+
+write_csv(
+  # Exportamos el diccionario para documentar la base.
+  diccionario_base_distrital,
+  file.path(ruta_resultados, "diccionario_sesion2.csv")
+)
+
+write_csv(
+  # Exportamos una versión en formato largo para ejercicios posteriores.
+  base_indicadores_larga,
+  file.path(ruta_resultados, "indicadores_sesion2.csv")
+)
+```
+
+La exportación deja productos reutilizables: la base integrada, un diccionario mínimo y una versión larga para ejercicios posteriores.
+
+## Ejercicios para seguir practicando
+
+1.  Usemos `plotly` para explorar interactivamente la relación entre denuncias y comisarías por distrito.
+2.  Identificar la modalidad más frecuente en cada departamento.
+3.  Calcular el porcentaje de vehículos operativos por distrito.
+4.  Encontrar distritos con denuncias policiales, pero sin vehículos PNP registrados.
+5.  Revisar si hay distritos con `ubigeo` presente en parque automotor, pero no en denuncias.
+6.  Repetir el join usando solo Lima Metropolitana.
+7.  Crear una tabla de denuncias por modalidad y año.
+8.  Exportar una base resumida por departamento.
+
+Estos ejercicios pueden apoyarse en el Posit Assistant de RStudio para revisar errores, pedir explicaciones de código y explorar alternativas de limpieza o visualización.
+
+### Ejercicio 1: Gráfico interactivo con plotly
+
+Usamos `plotly` para crear un gráfico interactivo que muestre la relación entre denuncias y comisarías por distrito. Este tipo de gráfico permite explorar los datos de manera dinámica, mostrando información detallada al pasar el cursor sobre cada punto. 
+
+Sin embargo, no será visible en el PDF generado, ya que `plotly` está diseñado para entornos HTML. Para verlo, es necesario ejecutar el bloque de código en RStudio, Positron o renderizar el documento en formato HTML.
+
+```{r}
+#| eval: !expr knitr::is_html_output()
+library(plotly)
+if (!exists("base_distrital")) {
+  preparar_fusiones()
+}
+
+grafico_comisarias <- base_distrital |>
+  filter(comisarias > 0) |>
+  ggplot(
+    aes(
+      x = comisarias,
+      y = denuncias_2024_2026,
+      text = paste0(
+        "<b>Distrito:</b> ",
+        dist_hecho,
+        "<br><b>Departamento:</b> ",
+        dpto_hecho_new,
+        "<br><b>Comisarías:</b> ",
+        comisarias,
+        "<br><b>Denuncias:</b> ",
+        scales::comma(denuncias_2024_2026)
+      )
+    )
+  ) +
+  geom_jitter(
+    width = 0.12,
+    height = 0,
+    alpha = 0.45,
+    color = "#2f4858",
+    size = 2
+  ) +
+  scale_x_continuous(
+    breaks = pretty_breaks(),
+    expand = expansion(mult = c(0.08, 0.12))
+  ) +
+  scale_y_continuous(
+    labels = comma,
+    expand = expansion(mult = c(0.03, 0.08))
+  ) +
+  labs(
+    title = "Denuncias y número de comisarías por distrito",
+    x = "Comisarías",
+    y = "Denuncias 2024-2026"
+  ) +
+  tema_sesion()
+
+ggplotly(
+  grafico_comisarias,
+  tooltip = "text"
+)
+```
