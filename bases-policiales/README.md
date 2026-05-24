@@ -1,27 +1,29 @@
-# Sesion 2B: gestion de datos policiales
+# Gestion de datos policiales
 
-Esta carpeta contiene todos los archivos necesarios para trabajar la sesion 2. Los nombres de archivos fueron simplificados para evitar problemas al descargar o descomprimir desde Paideia.
+Esta carpeta contiene todos los archivos de la sesión.
 
 ## Como usar
 
 1. Descargar y descomprimir el ZIP.
-2. Abrir `sesion2b_gestion_datos_policiales.qmd` en RStudio.
+2. Abrir `sesion2b_gestion_datos_policiales.qmd` en RStudio o Positron.
 3. Ejecutar primero los bloques:
    - Instalar paquetes
    - Activar paquetes
    - Ubicar archivos
-4. Luego ejecutar el resto del documento por secciones o usar `Render`.
+4. Luego ejecutar el resto del documento por secciones.
+5. Si se prefiere, en vez de ejecutar por secciones, se puede usar `Render`, para ejecutar todo de una vez y visualizar el HTML final
 
 ## Archivos principales
 
-- `sesion2b_gestion_datos_policiales.qmd`: documento principal.
-- `denuncias.csv`: denuncias policiales.
-- `personal.csv`: personal policial.
-- `parque.csv`: parque automotor de la PNP.
-- `trata.csv`: trata de personas.
-- `infraestructura.xlsx`: infraestructura de comisarias.
-- `comisarias_geo.csv`: ubicacion de comisarias.
-- `comisarias_lima.sav`: ejemplo de archivo SPSS.
+- `sesion2b_gestion_datos_policiales.qmd`: Documento principal en formato Quarto.
+- `denuncias.csv`: Denuncias policiales.
+- `personal.csv`: Personal policial.
+- `parque.csv`: Parque automotor de la PNP.
+- `trata.csv`: Trata de personas.
+- `infraestructura.xlsx`: Infraestructura de comisarias.
+- `comisarias_geo.csv`: Ubicacion de comisarias.
+- `comisarias_lima.sav`: Ejemplo de archivo SPSS.
+- `sesion2b_gestion_datos_policiales`: Disponible en HTML y pdf.
 
 ## Diccionarios
 
@@ -30,5 +32,3 @@ Esta carpeta contiene todos los archivos necesarios para trabajar la sesion 2. L
 - `dict_parque.xlsx`
 - `dict_presupuesto.xlsx`
 - `dict_sidpol.xlsx`
-
-Al ejecutar el QMD se pueden generar archivos CSV nuevos en esta misma carpeta.
