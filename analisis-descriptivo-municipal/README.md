@@ -1,6 +1,6 @@
 # Análisis descriptivo municipal
 
-Esta carpeta contiene todos los archivos necesarios para trabajar la sesion 3.
+Esta carpeta contiene todos los archivos necesarios para trabajar en RStudio (o Positron) y en SPSS.
 
 Esta version incluye una seccion ampliada de visualizaciones con `ggplot2`, `plotly`, `patchwork`, `hrbrthemes`, `paletteer`, `ggridges` y `ggbeeswarm`.
 
@@ -19,11 +19,14 @@ Esta version incluye una seccion ampliada de visualizaciones con `ggplot2`, `plo
 
 - `analisis_descriptivo_municipal.qmd`: Documento principal en formato Quarto.
 - `analisis_descriptivo_municipal`: Disponible en HTML y pdf.
-- `renamu2025.csv`: base RENAMU 2025.
+- `renamu2025.csv`: Base RENAMU 2025.
+- `Base-Datos_2025_f_.sav`: Base RENAMU 2025 en formato para SPSS, extraída de Microdatos del INEI.
 - `dict_renamu2025.pdf`: diccionario de variables de RENAMU 2025.
 
 ## Archivos complementarios
 
+- `Sintaxis1.sps`: Contiene los códigos para desplegar el análisis de tablas y gráficos en SPSS.
+- `Resultado1.spv`: Resultado de la sintaxis anterior.
 - `anexo8.xlsx`
 - `base_celular.xlsx`
 - `data_prepara.xlsx`
