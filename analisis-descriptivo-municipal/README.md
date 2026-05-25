@@ -13,7 +13,7 @@ Esta version incluye una seccion ampliada de visualizaciones con `ggplot2`, `plo
    - Activar paquetes
    - Ubicar archivos
 4. Luego ejecutar el resto del documento por secciones o usar `Render`.
-5. 5. Si se prefiere, en vez de ejecutar por secciones, se puede usar `Render` para ejecutar todo de una vez y visualizar el HTML final
+5. Si se prefiere, en vez de ejecutar por secciones, se puede usar `Render` para ejecutar todo de una vez y visualizar el HTML final
 
 ## Archivos principales
 
