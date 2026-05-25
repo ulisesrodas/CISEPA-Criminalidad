@@ -1,0 +1,1844 @@
+---
+title: "Análisis descriptivo de registros municipales"
+subtitle: "RENAMU, serenazgo, videovigilancia e intervenciones municipales"
+author: "Noam López Villanes"
+date: 2026-05-15
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    df-print: paged
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    prefer-html: true
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+## Objetivo de la sesión
+
+En esta sesión trabajaremos con registros municipales de seguridad ciudadana a partir de la RENAMU 2025. El objetivo es aprender a producir un análisis descriptivo univariado ordenado:
+
+1.  Importar correctamente una base separada por punto y coma.
+2.  Revisar estructura, dimensiones, nombres de variables y valores perdidos.
+3.  Seleccionar variables municipales vinculadas a seguridad ciudadana.
+4.  Calcular frecuencias, porcentajes, medidas de tendencia central y dispersión.
+5.  Identificar valores atípicos en conteos municipales.
+6.  Visualizar distribuciones de serenazgo, videovigilancia e intervenciones.
+7.  Exportar bases resumidas para ejercicios posteriores.
+
+## Preparación
+
+Si ejecutas este documento por partes, corre primero los chunks de **Instalar paquetes**, **Activar paquetes** y **Ubicar archivos**. Los tres están ocultos en el redenrizado final, pero esos bloques crean los paquetes, funciones y rutas que usan los demás chunks
+
+```{r}
+#| include: false
+# CARGAR PAQUETES
+paquetes <- c(
+  # Manipulación, limpieza y visualización de datos.
+  "tidyverse",
+  # Importación de archivos Excel.
+  "readxl",
+  # Limpieza de nombres de variables.
+  "janitor",
+  # Diagnóstico de estructura y valores perdidos.
+  "skimr",
+  # Exploración visual de valores perdidos.
+  "naniar",
+  # Reportes exploratorios rápidos.
+  "DataExplorer",
+  # Gráficos interactivos.
+  "plotly",
+  # Combinar varios gráficos en una misma figura.
+  "patchwork",
+  # Temas gráficos sobrios.
+  "hrbrthemes",
+  # Paletas de color.
+  "paletteer",
+  # Documentos dinámicos y reportes reproducibles.
+  "rmarkdown",
+  # Distribuciones tipo ridgeline.
+  "ggridges",
+  # Gráficos tipo beeswarm.
+  "ggbeeswarm",
+  # Treemaps para mostrar partes de un total.
+  "treemapify",
+  # Formato de porcentajes, comas y ejes.
+  "scales",
+  # Textos dinámicos en comentarios y etiquetas.
+  "glue",
+  # Para gráficos enjambre de abjeas.
+  "beeswarm",
+  "ggbeeswarm",
+  # Gráficos de ajuste de texto en etiquetas.
+  "vipor",
+  "ggfittext",
+  # Gráficos SVG para alta calidad en exportación.
+  "svglite"
+)
+
+paquetes_faltantes <- paquetes[!paquetes %in% rownames(installed.packages())]
+
+if (length(paquetes_faltantes) > 0) {
+  install.packages(
+    paquetes_faltantes,
+    repos = "https://packagemanager.posit.co/cran/latest"
+  )
+}
+```
+
+```{r}
+#| include: false
+# CARGAR LIBRERÍAS
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(skimr)
+library(naniar)
+library(DataExplorer)
+library(plotly)
+library(patchwork)
+library(hrbrthemes)
+library(paletteer)
+library(ggridges)
+library(ggbeeswarm)
+library(treemapify)
+library(scales)
+library(glue)
+
+resolver_ruta_sesion <- function() {
+  candidatos <- c(
+    getwd(),
+    if (
+      requireNamespace("rstudioapi", quietly = TRUE) &&
+        rstudioapi::isAvailable()
+    ) {
+      dirname(rstudioapi::getActiveDocumentContext()$path)
+    } else {
+      NA_character_
+    },
+    if (!is.null(knitr::current_input())) {
+      dirname(normalizePath(knitr::current_input(), mustWork = FALSE))
+    } else {
+      NA_character_
+    }
+  )
+
+  candidatos <- candidatos[!is.na(candidatos) & nzchar(candidatos)]
+  candidatos <- unique(normalizePath(candidatos, mustWork = FALSE))
+
+  ruta_valida <- candidatos[
+    file.exists(file.path(candidatos, "renamu2025.csv"))
+  ]
+
+  if (length(ruta_valida) == 0) {
+    stop(
+      "No encuentro el archivo 'renamu2025.csv'. ",
+      "Abre o ejecuta este QMD desde la carpeta de la Sesión 3."
+    )
+  }
+
+  ruta_valida[1]
+}
+
+knitr::opts_chunk$set(
+  fig.width = 9.5,
+  fig.height = 6.2,
+  fig.align = "center",
+  fig.retina = 1,
+  dpi = 120
+)
+
+tema_sesion <- function() {
+  theme_minimal(base_size = 11) +
+    theme(
+      plot.title = element_text(
+        size = 13,
+        hjust = 0.5,
+        margin = margin(b = 10)
+      ),
+      plot.subtitle = element_text(
+        size = 10,
+        hjust = 0.5,
+        margin = margin(b = 10)
+      ),
+      plot.margin = margin(t = 16, r = 24, b = 16, l = 24),
+      axis.title = element_text(size = 12),
+      axis.text = element_text(size = 9.5),
+      legend.position = "bottom"
+    )
+}
+```
+
+```{r}
+#| include: false
+# UBICAR ARCHIVOS
+ruta_sesion <- resolver_ruta_sesion()
+
+ruta_renamu <- ruta_sesion
+ruta_complementos <- ruta_sesion
+ruta_resultados <- ruta_sesion
+
+list.files(ruta_sesion)
+```
+
+Esta versión coloca todos los archivos en una sola carpeta, con nombres cortos y sin tildes, para evitar problemas al descargar materiales desde Paideia. El análisis usará `renamu2025.csv`; el diccionario `dict_renamu2025.pdf` sirve para interpretar los códigos de variables.
+
+```{r}
+#| include: false
+# FUNCIONES DE TRABAJO
+limpiar_numero <- function(x) {
+  # RENAMU usa #¡NULO! para valores sin dato; lo convertimos a NA.
+  x |>
+    na_if("#¡NULO!") |>
+    na_if("") |>
+    parse_number(locale = locale(decimal_mark = ".", grouping_mark = ","))
+}
+
+formatear_ubigeo <- function(x) {
+  # El ubigeo debe conservar ceros a la izquierda.
+  x |>
+    as.character() |>
+    str_remove("\\.0$") |>
+    str_pad(width = 6, side = "left", pad = "0")
+}
+
+etiquetar_si_no <- function(x) {
+  case_when(
+    x == 1 ~ "Sí",
+    x == 2 ~ "No",
+    is.na(x) ~ "Sin dato",
+    TRUE ~ as.character(x)
+  )
+}
+
+etiquetar_tipo_municipalidad <- function(x) {
+  case_when(
+    x == 1 ~ "Provincial",
+    x == 2 ~ "Distrital",
+    TRUE ~ "Otro o sin dato"
+  )
+}
+
+orden_meses <- c(
+  "ENE" = 1,
+  "FEB" = 2,
+  "MAR" = 3,
+  "ABR" = 4,
+  "MAY" = 5,
+  "JUN" = 6,
+  "JUL" = 7,
+  "AGO" = 8,
+  "SET" = 9,
+  "SEP" = 9,
+  "OCT" = 10,
+  "NOV" = 11,
+  "DIC" = 12
+)
+
+cargar_renamu_original <- function() {
+  if (!exists("renamu_original", inherits = FALSE)) {
+    renamu_original <<- read_delim(
+      file.path(ruta_renamu, "renamu2025.csv"),
+      delim = ";",
+      locale = locale(encoding = "UTF-8"),
+      col_types = cols(.default = col_character()),
+      show_col_types = FALSE
+    ) |>
+      clean_names()
+  }
+
+  invisible(TRUE)
+}
+
+preparar_renamu_seguridad <- function() {
+  # Seleccionamos variables del bloque de serenazgo, equipamiento e intervenciones.
+  cargar_renamu_original()
+
+  variables_seguridad <- c(
+    "ano",
+    "idmunici",
+    "ccdd",
+    "ccpp",
+    "ccdi",
+    "ubigeo",
+    "departamento",
+    "provincia",
+    "distrito",
+    "tipomuni",
+    "p69_1",
+    "p69_1_t",
+    "p69_1_m",
+    "p69_1_h",
+    "p69_2",
+    "p69_2_t",
+    "p69_2_m",
+    "p69_2_h",
+    "p70_1",
+    "p70a_1_1",
+    "p70a_1_2",
+    "p70a_1_3",
+    "p70a_1_4",
+    "p70_6",
+    "p70a_6_1",
+    "p70a_6_2",
+    "p70a_6_3",
+    "p70_7",
+    "p70a_7_1",
+    "p70a_7_2",
+    "p70a_7_3",
+    "p70a_7_4",
+    "p70_10",
+    "p70a_10_1",
+    "p70a_10_2",
+    "p70a_10_3",
+    "p70_13",
+    "p70a_13_1",
+    "p71_1",
+    "p71a_1",
+    "p71_2",
+    "p71a_2",
+    "p71_3",
+    "p71a_3",
+    "p71_4",
+    "p71a_4",
+    "p71_5",
+    "p71a_5",
+    "p71_6",
+    "p71a_6",
+    "p71_7",
+    "p71a_7",
+    "p71_8",
+    "p71a_8",
+    "p71_9",
+    "p71a_9",
+    "p71_10",
+    "p71a_10",
+    "p71_11",
+    "p71a_11",
+    "p71_12",
+    "p71a_12"
+  )
+
+  renamu_seguridad <<- renamu_original |>
+    select(any_of(variables_seguridad)) |>
+    mutate(
+      ubigeo = formatear_ubigeo(ubigeo),
+      across(
+        -c(
+          idmunici,
+          ccdd,
+          ccpp,
+          ccdi,
+          ubigeo,
+          departamento,
+          provincia,
+          distrito
+        ),
+        limpiar_numero
+      ),
+      tipo_municipalidad = etiquetar_tipo_municipalidad(tipomuni),
+      serenazgo_2024 = etiquetar_si_no(p69_1),
+      serenazgo_2025 = etiquetar_si_no(p69_2),
+      tiene_auto_camioneta = etiquetar_si_no(p70_1),
+      tiene_radio = etiquetar_si_no(p70_6),
+      tiene_camaras = etiquetar_si_no(p70_7),
+      tiene_central_videovigilancia = etiquetar_si_no(p70_10),
+      tiene_chaleco_antibalas = etiquetar_si_no(p70_13),
+      total_intervenciones = rowSums(
+        across(starts_with("p71a_")),
+        na.rm = TRUE
+      )
+    )
+
+  invisible(TRUE)
+}
+
+preparar_data_prepara <- function() {
+  if (!exists("data_prepara", inherits = FALSE)) {
+    data_prepara <<- read_excel(file.path(
+      ruta_complementos,
+      "data_prepara.xlsx"
+    )) |>
+      clean_names() |>
+      mutate(
+        ano = as.integer(ano),
+        mes = str_to_upper(mes),
+        mes_num = unname(orden_meses[mes]),
+        fecha = as.Date(sprintf("%s-%02d-01", ano, mes_num)),
+        valor = as.numeric(valor)
+      ) |>
+      filter(!is.na(fecha))
+  }
+
+  invisible(TRUE)
+}
+
+preparar_base_celular <- function() {
+  if (!exists("base_celular", inherits = FALSE)) {
+    base_celular <<- read_excel(file.path(
+      ruta_complementos,
+      "base_celular.xlsx"
+    )) |>
+      clean_names() |>
+      mutate(
+        edad = limpiar_numero(edad),
+        sexo = case_when(
+          sexo == "F" ~ "Mujer",
+          sexo == "M" ~ "Hombre",
+          TRUE ~ "Sin dato"
+        ),
+        dpto_hecho_new = str_squish(dpto_hecho_new),
+        anio = as.integer(anio),
+        mes = as.integer(mes)
+      )
+  }
+
+  invisible(TRUE)
+}
+```
+
+## Importación
+
+### Revisar el separador del archivo
+
+```{r}
+renamu_lectura_incorrecta <- read_csv(
+  # read_csv() asume comas, pero este archivo viene separado por punto y coma.
+  file.path(ruta_renamu, "renamu2025.csv"),
+  n_max = 5,
+  show_col_types = FALSE
+)
+
+ncol(renamu_lectura_incorrecta)
+```
+
+Cuando una base aparece como una sola columna, no necesariamente está dañada. Muchas veces el problema es el separador: coma, punto y coma, tabulador u otro carácter.
+
+### Importar RENAMU correctamente
+
+```{r}
+cargar_renamu_original()
+
+glimpse(renamu_original[, 1:12])
+```
+
+La base se importa correctamente con `read_delim(delim = ";")`. Mantener inicialmente las columnas como texto ayuda a controlar códigos como `#¡NULO!` antes de convertir variables numéricas.
+
+## Estructura de la base
+
+### Dimensiones generales
+
+```{r}
+resumen_base <- tibble(
+  base = "RENAMU 2025",
+  filas = nrow(renamu_original),
+  columnas = ncol(renamu_original)
+)
+
+resumen_base
+```
+
+La RENAMU tiene una fila por municipalidad y muchas columnas porque recoge información de distintos módulos municipales. Para esta sesión no usaremos todo el cuestionario, sino el bloque de seguridad ciudadana.
+
+### Seleccionar variables de seguridad
+
+```{r}
+preparar_renamu_seguridad()
+
+renamu_seguridad |>
+  select(
+    ano,
+    ubigeo,
+    departamento,
+    provincia,
+    distrito,
+    tipo_municipalidad,
+    serenazgo_2025,
+    p69_2_t,
+    tiene_camaras,
+    p70a_7_1,
+    tiene_central_videovigilancia,
+    total_intervenciones
+  ) |>
+  head(10)
+```
+
+Trabajar con un subconjunto permite concentrar la sesión en preguntas sustantivas: si el municipio brinda serenazgo, con cuántos efectivos cuenta, qué equipamiento tiene y cuántas intervenciones registra.
+
+### Valores perdidos
+
+```{r}
+preparar_renamu_seguridad()
+
+perdidos_seguridad <- renamu_seguridad |>
+  summarise(
+    across(
+      c(p69_2_t, p70a_1_1, p70a_7_1, p70a_10_1, p71a_1, total_intervenciones),
+      ~ sum(is.na(.x))
+    )
+  ) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "perdidos"
+  ) |>
+  mutate(porcentaje = perdidos / nrow(renamu_seguridad))
+
+perdidos_seguridad
+```
+
+Los valores perdidos no siempre son errores. En este caso, varios conteos aparecen vacíos porque la municipalidad respondió que no tiene el servicio, equipo o intervención correspondiente.
+
+```{r}
+perdidos_seguridad |>
+  ggplot(aes(x = reorder(variable, porcentaje), y = porcentaje)) +
+  geom_segment(
+    aes(xend = variable, y = 0, yend = porcentaje),
+    color = "#b8b8b8",
+    linewidth = 0.8
+  ) +
+  geom_point(size = 4, color = "#577590") +
+  geom_text(
+    aes(label = percent(porcentaje, accuracy = 0.1)),
+    hjust = -0.15,
+    size = 3.2
+  ) +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1)) +
+  labs(
+    title = "Valores perdidos en variables seleccionadas",
+    x = NULL,
+    y = "Porcentaje de municipalidades"
+  ) +
+  tema_sesion()
+```
+
+El gráfico permite distinguir variables casi completas de variables condicionadas por filtros del cuestionario. En encuestas o registros administrativos, el patrón de pérdida suele depender de la lógica de preguntas.
+
+### Duplicados por ubigeo
+
+```{r}
+duplicados_ubigeo <- renamu_seguridad |>
+  count(ubigeo, sort = TRUE) |>
+  filter(n > 1)
+
+duplicados_ubigeo
+```
+
+Si esta tabla queda vacía, cada municipalidad aparece una sola vez por `ubigeo`. Esa revisión es básica antes de resumir información territorial.
+
+## Cobertura del servicio de serenazgo
+
+### Serenazgo al 31 de marzo de 2025
+
+```{r}
+preparar_renamu_seguridad()
+
+cobertura_serenazgo <- renamu_seguridad |>
+  count(serenazgo_2025, name = "municipalidades") |>
+  mutate(porcentaje = municipalidades / sum(municipalidades))
+
+cobertura_serenazgo
+```
+
+Esta tabla responde una primera pregunta descriptiva: cuántas municipalidades declaran brindar serenazgo al 31 de marzo de 2025.
+
+```{r}
+cobertura_serenazgo |>
+  filter(serenazgo_2025 != "Sin dato") |>
+  mutate(
+    bloques = round(porcentaje * 100),
+    estado = str_c(
+      serenazgo_2025,
+      " (",
+      percent(porcentaje, accuracy = 0.1),
+      ")"
+    )
+  ) |>
+  uncount(bloques) |>
+  mutate(
+    celda = row_number(),
+    columna = (celda - 1) %% 10,
+    fila = (celda - 1) %/% 10
+  ) |>
+  ggplot(aes(x = columna, y = fila, fill = estado)) +
+  geom_tile(
+    color = "white",
+    linewidth = 0.6,
+    width = 0.95,
+    height = 0.95
+  ) +
+  coord_equal() +
+  scale_y_reverse() +
+  scale_fill_manual(values = c("#b56576", "#2f6f73")) +
+  labs(
+    title = "Municipalidades que brindan serenazgo",
+    subtitle = "RENAMU 2025",
+    fill = NULL
+  ) +
+  theme_void(base_size = 11) +
+  theme(legend.position = "bottom")
+```
+
+La visualización muestra la cobertura general del servicio. Es una lectura univariada porque analiza una sola variable categórica.
+
+### Cobertura por departamento
+
+```{r}
+serenazgo_departamento <- renamu_seguridad |>
+  group_by(departamento) |>
+  summarise(
+    municipalidades = n(),
+    con_serenazgo = sum(p69_2 == 1, na.rm = TRUE),
+    porcentaje_serenazgo = con_serenazgo / municipalidades,
+    .groups = "drop"
+  ) |>
+  arrange(desc(porcentaje_serenazgo))
+
+serenazgo_departamento
+```
+
+Aunque el foco de la sesión es descriptivo, agrupar por departamento ayuda a mostrar heterogeneidad territorial sin pasar todavía a modelos explicativos.
+
+```{r, fig.height=7.8}
+serenazgo_departamento |>
+  mutate(departamento = reorder(departamento, porcentaje_serenazgo)) |>
+  ggplot(aes(x = porcentaje_serenazgo, y = departamento)) +
+  geom_segment(
+    aes(x = 0, xend = porcentaje_serenazgo, yend = departamento),
+    color = "#d8d8d8",
+    linewidth = 0.7
+  ) +
+  geom_point(aes(color = porcentaje_serenazgo), size = 3.2) +
+  geom_text(
+    aes(label = percent(porcentaje_serenazgo, accuracy = 1)),
+    hjust = -0.18,
+    size = 2.7
+  ) +
+  scale_x_continuous(labels = percent_format(), limits = c(0, 1.08)) +
+  scale_color_paletteer_c("viridis::mako", labels = percent_format()) +
+  labs(
+    title = "Cobertura de serenazgo por departamento",
+    subtitle = "Porcentaje de municipalidades que reportan serenazgo",
+    x = "Cobertura",
+    y = NULL,
+    fill = "Cobertura"
+  ) +
+  tema_sesion() +
+  theme(
+    axis.text.y = element_text(size = 7.4),
+    legend.position = "none"
+  )
+```
+
+El gráfico ordenado facilita comparar departamentos sin apretar las etiquetas. En análisis descriptivo, ordenar categorías suele ser más útil que dejarlas alfabéticamente.
+
+## Efectivos de serenazgo
+
+### Distribución general
+
+```{r}
+efectivos_serenazgo <- renamu_seguridad |>
+  filter(p69_2 == 1) |>
+  summarise(
+    municipalidades = n(),
+    minimo = min(p69_2_t, na.rm = TRUE),
+    q1 = quantile(p69_2_t, 0.25, na.rm = TRUE),
+    mediana = median(p69_2_t, na.rm = TRUE),
+    promedio = mean(p69_2_t, na.rm = TRUE),
+    q3 = quantile(p69_2_t, 0.75, na.rm = TRUE),
+    maximo = max(p69_2_t, na.rm = TRUE)
+  )
+
+efectivos_serenazgo
+```
+
+La media puede ser mucho mayor que la mediana cuando pocas municipalidades concentran muchos efectivos. Por eso conviene reportar varias medidas, no solo el promedio.
+
+```{r}
+renamu_seguridad |>
+  filter(p69_2 == 1, !is.na(p69_2_t)) |>
+  ggplot(aes(x = p69_2_t)) +
+  geom_histogram(binwidth = 25, fill = "#577590", color = "white") +
+  scale_x_continuous(labels = comma_format()) +
+  labs(
+    title = "Distribución de efectivos de serenazgo",
+    subtitle = "Municipalidades que brindan serenazgo",
+    x = "Efectivos de serenazgo",
+    y = "Número de municipalidades"
+  ) +
+  tema_sesion()
+```
+
+La distribución está concentrada en valores bajos y tiene una cola larga. Este patrón es común en registros territoriales: pocas unidades grandes pueden dominar la escala.
+
+### Valores atípicos
+
+```{r}
+limites_efectivos <- renamu_seguridad |>
+  filter(p69_2 == 1, !is.na(p69_2_t)) |>
+  summarise(
+    q1 = quantile(p69_2_t, 0.25),
+    q3 = quantile(p69_2_t, 0.75),
+    iqr = IQR(p69_2_t),
+    limite_superior = q3 + 1.5 * iqr
+  )
+
+municipalidades_atipicas <- renamu_seguridad |>
+  filter(p69_2 == 1, p69_2_t > limites_efectivos$limite_superior) |>
+  arrange(desc(p69_2_t)) |>
+  select(departamento, provincia, distrito, p69_2_t)
+
+limites_efectivos
+municipalidades_atipicas |> head(15)
+```
+
+Un valor atípico no debe borrarse automáticamente. En conteos municipales puede representar una capital provincial, un distrito grande o una diferencia real de capacidad institucional.
+
+```{r}
+renamu_seguridad |>
+  filter(p69_2 == 1, !is.na(p69_2_t)) |>
+  ggplot(aes(x = tipo_municipalidad, y = p69_2_t, fill = tipo_municipalidad)) +
+  geom_boxplot(show.legend = FALSE, outlier.alpha = 0.45) +
+  scale_y_continuous(labels = comma_format()) +
+  labs(
+    title = "Efectivos de serenazgo según tipo de municipalidad",
+    x = NULL,
+    y = "Efectivos"
+  ) +
+  tema_sesion()
+```
+
+El boxplot permite comparar distribución, mediana y valores extremos entre municipalidades provinciales y distritales. Es útil cuando la variable numérica tiene mucha dispersión.
+
+### Composición por sexo
+
+```{r}
+efectivos_sexo <- renamu_seguridad |>
+  filter(p69_2 == 1) |>
+  summarise(
+    hombres = sum(p69_2_h, na.rm = TRUE),
+    mujeres = sum(p69_2_m, na.rm = TRUE)
+  ) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "sexo",
+    values_to = "efectivos"
+  ) |>
+  mutate(porcentaje = efectivos / sum(efectivos))
+
+efectivos_sexo
+```
+
+Esta tabla muestra la composición agregada del personal de serenazgo por sexo. La interpretación debe hacerse con cuidado porque no es una tasa por municipalidad, sino un total acumulado.
+
+```{r}
+efectivos_sexo |>
+  ggplot(aes(x = 2, y = porcentaje, fill = sexo)) +
+  geom_col(color = "white", width = 1) +
+  coord_polar(theta = "y") +
+  xlim(0.5, 2.5) +
+  geom_text(
+    aes(label = percent(porcentaje, accuracy = 0.1)),
+    position = position_stack(vjust = 0.5),
+    size = 4
+  ) +
+  scale_fill_manual(values = c("hombres" = "#577590", "mujeres" = "#b56576")) +
+  labs(
+    title = "Composición del serenazgo por sexo",
+    fill = NULL
+  ) +
+  theme_void(base_size = 11) +
+  theme(
+    plot.title = element_text(size = 13, hjust = 0.5, margin = margin(b = 10)),
+    legend.position = "bottom"
+  )
+```
+
+El gráfico permite observar rápidamente la composición del personal. Para profundizar, podría calcularse el porcentaje de mujeres dentro de cada municipalidad.
+
+## Equipamiento e infraestructura
+
+### Variables principales de equipamiento
+
+```{r}
+equipamiento_resumen <- renamu_seguridad |>
+  summarise(
+    auto_o_camioneta = sum(p70_1 == 1, na.rm = TRUE),
+    radio_comunicador = sum(p70_6 == 1, na.rm = TRUE),
+    camara_videovigilancia = sum(p70_7 == 1, na.rm = TRUE),
+    central_videovigilancia = sum(p70_10 == 1, na.rm = TRUE),
+    chaleco_antibalas = sum(p70_13 == 1, na.rm = TRUE),
+    municipalidades = n()
+  ) |>
+  pivot_longer(
+    cols = -municipalidades,
+    names_to = "recurso",
+    values_to = "municipalidades_con_recurso"
+  ) |>
+  mutate(
+    porcentaje = municipalidades_con_recurso / municipalidades,
+    recurso = str_replace_all(recurso, "_", " ")
+  ) |>
+  arrange(desc(porcentaje))
+
+equipamiento_resumen
+```
+
+Esta tabla compara la presencia de distintos recursos municipales. La lectura sigue siendo univariada por recurso, pero el formato permite ponerlos en una misma vista.
+
+```{r}
+equipamiento_resumen |>
+  mutate(
+    recurso = str_to_sentence(recurso),
+    no_tiene = 1 - porcentaje
+  ) |>
+  select(recurso, tiene = porcentaje, no_tiene) |>
+  pivot_longer(
+    cols = c(tiene, no_tiene),
+    names_to = "estado",
+    values_to = "porcentaje"
+  ) |>
+  mutate(
+    color_texto = if_else(porcentaje < 0.45, "white", "black")
+  ) |>
+  ggplot(aes(x = estado, y = reorder(recurso, porcentaje), fill = porcentaje)) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  geom_text(
+    aes(label = percent(porcentaje, accuracy = 0.1), color = color_texto),
+    size = 3.2
+  ) +
+  scale_x_discrete(labels = c("no_tiene" = "No tiene", "tiene" = "Tiene")) +
+  scale_fill_paletteer_c("viridis::mako", labels = percent_format()) +
+  scale_color_identity() +
+  labs(
+    title = "Municipalidades con recursos para serenazgo",
+    subtitle = "Matriz de presencia y ausencia de recursos",
+    x = NULL,
+    y = NULL,
+    fill = "Porcentaje"
+  ) +
+  tema_sesion()
+```
+
+Ordenar recursos por porcentaje ayuda a identificar qué capacidades están más extendidas y cuáles son menos frecuentes.
+
+### Cámaras de videovigilancia
+
+```{r}
+camaras_resumen <- renamu_seguridad |>
+  filter(p70_7 == 1) |>
+  summarise(
+    municipalidades_con_camaras = n(),
+    total_camaras = sum(p70a_7_1, na.rm = TRUE),
+    camaras_operativas = sum(p70a_7_2, na.rm = TRUE),
+    camaras_no_operativas = sum(p70a_7_3, na.rm = TRUE),
+    camaras_integradas_pnp = sum(p70a_7_4, na.rm = TRUE),
+    porcentaje_operativas = camaras_operativas / total_camaras,
+    porcentaje_integradas_pnp = camaras_integradas_pnp / camaras_operativas
+  )
+
+camaras_resumen
+```
+
+No basta con saber si una municipalidad tiene cámaras. Para gestión de seguridad, interesa cuántas están operativas y cuántas están integradas a la PNP.
+
+```{r}
+camaras_departamento <- renamu_seguridad |>
+  group_by(departamento) |>
+  summarise(
+    municipalidades = n(),
+    con_camaras = sum(p70_7 == 1, na.rm = TRUE),
+    total_camaras = sum(p70a_7_1, na.rm = TRUE),
+    camaras_operativas = sum(p70a_7_2, na.rm = TRUE),
+    camaras_no_operativas = sum(p70a_7_3, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(
+    porcentaje_con_camaras = con_camaras / municipalidades,
+    porcentaje_operativas = camaras_operativas / total_camaras
+  ) |>
+  arrange(desc(total_camaras))
+
+camaras_departamento
+```
+
+Este resumen muestra tanto cobertura municipal como volumen de cámaras. Un departamento puede tener muchas cámaras por pocas municipalidades grandes, o una cobertura más distribuida.
+
+```{r}
+camaras_departamento |>
+  slice_max(total_camaras, n = 15) |>
+  mutate(
+    departamento = reorder(departamento, total_camaras)
+  ) |>
+  select(departamento, camaras_operativas, camaras_no_operativas) |>
+  pivot_longer(
+    cols = c(camaras_operativas, camaras_no_operativas),
+    names_to = "estado",
+    values_to = "camaras"
+  ) |>
+  ggplot(aes(x = departamento, y = camaras, fill = estado)) +
+  geom_col(width = 0.75) +
+  coord_flip() +
+  scale_y_continuous(labels = comma_format()) +
+  scale_fill_manual(
+    breaks = c("camaras_operativas", "camaras_no_operativas"),
+    values = c(
+      "camaras_operativas" = "#2f6f73",
+      "camaras_no_operativas" = "#b56576"
+    ),
+    labels = c("Operativas", "No operativas")
+  ) +
+  labs(
+    title = "Cámaras de videovigilancia por estado",
+    subtitle = "Departamentos con mayor número total de cámaras",
+    x = NULL,
+    y = "Número de cámaras",
+    fill = NULL
+  ) +
+  tema_sesion()
+```
+
+El ranking permite ubicar la concentración del equipamiento. En este gráfico, el tramo verde corresponde a cámaras operativas y el tramo rosa a cámaras no operativas. La lectura principal es doble: dónde se concentra el volumen de cámaras y qué parte de ese equipamiento está fuera de operación.
+
+## Intervenciones registradas por serenazgo
+
+### Total por tipo de intervención
+
+```{r}
+intervenciones_larga <- renamu_seguridad |>
+  select(
+    ubigeo,
+    departamento,
+    provincia,
+    distrito,
+    robo_transeuntes = p71a_1,
+    robo_domicilio = p71a_2,
+    robo_vehiculos = p71a_3,
+    robo_autopartes = p71a_4,
+    robo_establecimientos = p71a_5,
+    alcohol_via_publica = p71a_6,
+    consumo_drogas = p71a_7,
+    accidentes_transito = p71a_8,
+    comercio_informal = p71a_9,
+    violencia_familiar = p71a_10,
+    pandillaje = p71a_11,
+    otro = p71a_12
+  ) |>
+  pivot_longer(
+    cols = -c(ubigeo, departamento, provincia, distrito),
+    names_to = "tipo_intervencion",
+    values_to = "intervenciones"
+  )
+
+intervenciones_tipo <- intervenciones_larga |>
+  group_by(tipo_intervencion) |>
+  summarise(
+    intervenciones = sum(intervenciones, na.rm = TRUE),
+    municipalidades_con_registro = sum(intervenciones > 0, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  mutate(porcentaje = intervenciones / sum(intervenciones)) |>
+  arrange(desc(intervenciones))
+
+intervenciones_tipo
+```
+
+Esta tabla permite identificar qué tipos de intervención concentran más registros de serenazgo. El total depende tanto de la incidencia del problema como de la capacidad municipal de registrar intervenciones.
+
+```{r}
+intervenciones_tipo |>
+  mutate(
+    etiqueta = str_to_sentence(str_replace_all(tipo_intervencion, "_", " "))
+  ) |>
+  ggplot(aes(
+    area = intervenciones,
+    fill = tipo_intervencion,
+    label = etiqueta
+  )) +
+  treemapify::geom_treemap(color = "white", linewidth = 0.8) +
+  treemapify::geom_treemap_text(
+    color = "white",
+    place = "center",
+    grow = TRUE,
+    reflow = TRUE,
+    min.size = 6
+  ) +
+  scale_fill_paletteer_d("ggsci::category20_d3", guide = "none") +
+  labs(
+    title = "Intervenciones registradas por tipo",
+    subtitle = "El tamaño representa el volumen de intervenciones"
+  ) +
+  tema_sesion() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+```
+
+La visualización ayuda a priorizar categorías para discusión. En esta etapa no afirmamos causalidad: solo describimos el volumen registrado.
+
+### Intervenciones por departamento
+
+```{r}
+intervenciones_departamento <- renamu_seguridad |>
+  group_by(departamento) |>
+  summarise(
+    municipalidades = n(),
+    total_intervenciones = sum(total_intervenciones, na.rm = TRUE),
+    promedio_intervenciones = mean(total_intervenciones, na.rm = TRUE),
+    mediana_intervenciones = median(total_intervenciones, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(desc(total_intervenciones))
+
+intervenciones_departamento
+```
+
+El total departamental muestra volumen agregado, mientras que promedio y mediana resumen el comportamiento municipal. Conviene mirar ambas escalas.
+
+```{r}
+intervenciones_departamento |>
+  slice_max(total_intervenciones, n = 15) |>
+  mutate(departamento = reorder(departamento, total_intervenciones)) |>
+  ggplot(aes(x = total_intervenciones, y = departamento)) +
+  geom_segment(
+    aes(x = 0, xend = total_intervenciones, yend = departamento),
+    color = "#b8b8b8",
+    linewidth = 0.8
+  ) +
+  geom_point(size = 3.2, color = "#577590") +
+  scale_x_continuous(labels = comma_format()) +
+  labs(
+    title = "Departamentos con más intervenciones de serenazgo",
+    x = "Intervenciones registradas",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+Los departamentos con mayor volumen pueden reflejar mayor actividad, mayor población, mejor registro o una combinación de esas condiciones.
+
+### Municipalidades con más intervenciones
+
+```{r}
+renamu_seguridad |>
+  arrange(desc(total_intervenciones)) |>
+  select(
+    departamento,
+    provincia,
+    distrito,
+    tipo_municipalidad,
+    total_intervenciones
+  ) |>
+  head(20)
+```
+
+Revisar los casos extremos permite detectar municipalidades influyentes. Antes de graficar o modelar, conviene saber qué unidades explican buena parte del total.
+
+```{r}
+renamu_seguridad |>
+  filter(total_intervenciones > 0) |>
+  ggplot(aes(x = total_intervenciones)) +
+  geom_histogram(bins = 40, fill = "#b56576", color = "white") +
+  scale_x_log10(labels = comma_format()) +
+  labs(
+    title = "Distribución de intervenciones municipales",
+    subtitle = "Escala logarítmica para observar mejor la cola de la distribución",
+    x = "Intervenciones registradas",
+    y = "Número de municipalidades"
+  ) +
+  tema_sesion()
+```
+
+La escala logarítmica es útil cuando hay mucha concentración. No cambia los datos; solo facilita observar valores pequeños y grandes en el mismo gráfico.
+
+## Primer cruce descriptivo
+
+### Serenazgo, cámaras e intervenciones
+
+```{r}
+cruce_capacidad_intervenciones <- renamu_seguridad |>
+  mutate(
+    grupo_camaras = case_when(
+      p70_7 == 1 ~ "Tiene cámaras",
+      p70_7 == 2 ~ "No tiene cámaras",
+      TRUE ~ "Sin dato"
+    )
+  ) |>
+  group_by(grupo_camaras) |>
+  summarise(
+    municipalidades = n(),
+    promedio_intervenciones = mean(total_intervenciones, na.rm = TRUE),
+    mediana_intervenciones = median(total_intervenciones, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+cruce_capacidad_intervenciones
+```
+
+Este cruce sigue siendo descriptivo: compara intervenciones según disponibilidad de cámaras. No prueba que las cámaras causen más o menos intervenciones.
+
+```{r}
+renamu_seguridad |>
+  filter(p70_7 %in% c(1, 2), total_intervenciones > 0) |>
+  mutate(
+    grupo_camaras = if_else(p70_7 == 1, "Tiene cámaras", "No tiene cámaras")
+  ) |>
+  ggplot(aes(
+    x = grupo_camaras,
+    y = total_intervenciones,
+    fill = grupo_camaras
+  )) +
+  geom_boxplot(show.legend = FALSE, outlier.alpha = 0.35) +
+  scale_y_log10(labels = comma_format()) +
+  labs(
+    title = "Intervenciones según disponibilidad de cámaras",
+    x = NULL,
+    y = "Intervenciones registradas"
+  ) +
+  tema_sesion()
+```
+
+La comparación sugiere diferencias de distribución entre municipalidades con y sin cámaras. Para interpretarla mejor harían falta controles por población, urbanidad y capacidad administrativa.
+
+## Galería aplicada de visualizaciones
+
+Esta sección usa varias familias de gráficos como una caja de herramientas. La pregunta no es “qué gráfico se ve mejor”, sino qué forma visual ayuda a entender mejor una variable, una comparación o una relación.
+
+### Histograma y densidad
+
+Pregunta: ¿la mayoría de municipalidades tiene pocos o muchos efectivos de serenazgo?
+
+```{r}
+preparar_renamu_seguridad()
+
+datos_efectivos <- renamu_seguridad |>
+  filter(p69_2 == 1, !is.na(p69_2_t), p69_2_t > 0)
+
+grafico_histograma <- datos_efectivos |>
+  ggplot(aes(x = p69_2_t)) +
+  geom_histogram(bins = 35, fill = "#5b8e7d", color = "white") +
+  scale_x_log10(labels = comma_format()) +
+  labs(
+    title = "Histograma",
+    subtitle = "Frecuencia de municipalidades",
+    x = "Efectivos de serenazgo",
+    y = "Municipalidades"
+  ) +
+  tema_sesion()
+
+grafico_densidad <- datos_efectivos |>
+  ggplot(aes(x = p69_2_t)) +
+  geom_density(fill = "#f4a261", alpha = 0.65, color = "#9c6644") +
+  scale_x_log10(labels = comma_format()) +
+  labs(
+    title = "Densidad",
+    subtitle = "Forma suavizada de la distribución",
+    x = "Efectivos de serenazgo",
+    y = "Densidad"
+  ) +
+  tema_sesion()
+
+grafico_histograma + grafico_densidad
+```
+
+El histograma muestra conteos por intervalos; la densidad ayuda a ver la forma general de la distribución. En ambos usamos escala logarítmica porque hay pocas municipalidades con muchos efectivos.
+
+### Violin y beeswarm
+
+Pregunta: ¿las municipalidades provinciales y distritales tienen distribuciones parecidas de efectivos?
+
+```{r}
+datos_efectivos |>
+  filter(p69_2_t <= quantile(p69_2_t, 0.98, na.rm = TRUE)) |>
+  ggplot(aes(x = tipo_municipalidad, y = p69_2_t, fill = tipo_municipalidad)) +
+  geom_violin(alpha = 0.6, show.legend = FALSE, trim = FALSE) +
+  ggbeeswarm::geom_quasirandom(
+    width = 0.18,
+    alpha = 0.35,
+    size = 1.2,
+    show.legend = FALSE
+  ) +
+  scale_fill_paletteer_d("MetBrewer::Hiroshige") +
+  scale_y_continuous(labels = comma_format()) +
+  labs(
+    title = "Violin + beeswarm de efectivos de serenazgo",
+    subtitle = "Se excluye el 2% superior para evitar que la cola oculte el patrón central",
+    x = NULL,
+    y = "Efectivos"
+  ) +
+  tema_sesion()
+```
+
+El violin permite comparar la forma de la distribución; el beeswarm muestra cada municipalidad como un punto. Esta combinación evita esconder los datos detrás de una sola caja.
+
+### Ridgeline por departamento
+
+Pregunta: ¿en qué departamentos los efectivos se concentran en pocas municipalidades y en cuáles se distribuyen más?
+
+```{r}
+departamentos_top_efectivos <- datos_efectivos |>
+  group_by(departamento) |>
+  summarise(total_efectivos = sum(p69_2_t, na.rm = TRUE), .groups = "drop") |>
+  slice_max(total_efectivos, n = 10)
+
+datos_efectivos |>
+  semi_join(departamentos_top_efectivos, by = "departamento") |>
+  filter(p69_2_t > 0) |>
+  ggplot(aes(
+    x = p69_2_t,
+    y = reorder(departamento, p69_2_t),
+    fill = after_stat(x)
+  )) +
+  ggridges::geom_density_ridges_gradient(
+    scale = 1.7,
+    rel_min_height = 0.01,
+    alpha = 0.85
+  ) +
+  scale_x_log10(labels = comma_format()) +
+  scale_fill_paletteer_c("viridis::mako", guide = "none") +
+  labs(
+    title = "Ridgeline de efectivos de serenazgo",
+    subtitle = "Departamentos con mayor número total de efectivos",
+    x = "Efectivos por municipalidad",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+El ridgeline sirve para comparar distribuciones entre varios grupos sin multiplicar demasiados gráficos. Aquí ayuda a ver si un departamento concentra efectivos en pocas municipalidades o si la distribución es más extendida.
+
+### Lollipop de ranking
+
+Pregunta: ¿qué municipalidades concentran el mayor número de intervenciones registradas por serenazgo?
+
+```{r}
+renamu_seguridad |>
+  arrange(desc(total_intervenciones)) |>
+  slice_head(n = 15) |>
+  mutate(municipalidad = str_c(distrito, " (", departamento, ")")) |>
+  ggplot(aes(
+    x = total_intervenciones,
+    y = reorder(municipalidad, total_intervenciones)
+  )) +
+  geom_segment(
+    aes(x = 0, xend = total_intervenciones, yend = municipalidad),
+    color = "#b8b8b8"
+  ) +
+  geom_point(size = 3, color = "#b56576") +
+  scale_x_continuous(labels = comma_format()) +
+  labs(
+    title = "Ranking de municipalidades por intervenciones",
+    subtitle = "Gráfico lollipop",
+    x = "Intervenciones registradas",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+El lollipop es una alternativa más liviana al barplot cuando queremos mostrar un ranking. Funciona bien si el interés está en el orden y la distancia entre casos.
+
+### Barras agrupadas y apiladas
+
+Pregunta: ¿las municipalidades provinciales y distritales tienen el mismo perfil de recursos para serenazgo?
+
+```{r}
+recursos_tipo <- renamu_seguridad |>
+  group_by(tipo_municipalidad) |>
+  summarise(
+    auto_o_camioneta = mean(p70_1 == 1, na.rm = TRUE),
+    radio = mean(p70_6 == 1, na.rm = TRUE),
+    camaras = mean(p70_7 == 1, na.rm = TRUE),
+    central = mean(p70_10 == 1, na.rm = TRUE),
+    chaleco = mean(p70_13 == 1, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  pivot_longer(
+    cols = -tipo_municipalidad,
+    names_to = "recurso",
+    values_to = "porcentaje"
+  ) |>
+  mutate(recurso = str_replace_all(recurso, "_", " "))
+
+recursos_tipo |>
+  ggplot(aes(x = recurso, y = porcentaje, fill = tipo_municipalidad)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.7) +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_paletteer_d("MetBrewer::Archambault") +
+  labs(
+    title = "Recursos municipales por tipo de municipalidad",
+    subtitle = "Barras agrupadas",
+    x = NULL,
+    y = "Porcentaje con recurso",
+    fill = NULL
+  ) +
+  tema_sesion()
+```
+
+Las barras agrupadas comparan porcentajes entre dos grupos. Aquí permiten ver diferencias entre municipalidades provinciales y distritales en capacidades de serenazgo.
+
+Pregunta: ¿cómo cambia la composición relativa de recursos entre tipos de municipalidad?
+
+```{r}
+recursos_tipo |>
+  group_by(tipo_municipalidad) |>
+  mutate(participacion = porcentaje / sum(porcentaje, na.rm = TRUE)) |>
+  ungroup() |>
+  ggplot(aes(x = tipo_municipalidad, y = participacion, fill = recurso)) +
+  geom_col(width = 0.65) +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_paletteer_d("ggsci::category20_d3") +
+  labs(
+    title = "Composición relativa de recursos observados",
+    subtitle = "Barras apiladas normalizadas",
+    x = NULL,
+    y = "Participación dentro del conjunto de recursos",
+    fill = "Recurso"
+  ) +
+  tema_sesion()
+```
+
+Las barras apiladas normalizadas muestran composición, no volumen absoluto. Sirven para comparar perfiles, pero no reemplazan el gráfico anterior.
+
+### Bubble plot interactivo
+
+Pregunta: ¿los departamentos con más efectivos y cámaras son también los que registran más intervenciones?
+
+```{r}
+#| eval: !expr knitr::is_html_output()
+indicadores_burbujas <- renamu_seguridad |>
+  group_by(departamento) |>
+  summarise(
+    municipalidades = n(),
+    efectivos = sum(p69_2_t, na.rm = TRUE),
+    camaras = sum(p70a_7_1, na.rm = TRUE),
+    intervenciones = sum(total_intervenciones, na.rm = TRUE),
+    porcentaje_serenazgo = mean(p69_2 == 1, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+plotly::plot_ly(
+  data = indicadores_burbujas,
+  x = ~efectivos,
+  y = ~intervenciones,
+  type = "scatter",
+  mode = "markers",
+  size = ~camaras,
+  color = ~porcentaje_serenazgo,
+  colors = c("#0d0887", "#7e03a8", "#cc4778", "#f89540", "#f0f921"),
+  sizes = c(8, 38),
+  marker = list(opacity = 0.75, line = list(width = 1, color = "white")),
+  text = ~ str_c(
+    departamento,
+    "<br>Efectivos: ",
+    comma(efectivos),
+    "<br>Intervenciones: ",
+    comma(intervenciones),
+    "<br>Cámaras: ",
+    comma(camaras),
+    "<br>% con serenazgo: ",
+    percent(porcentaje_serenazgo, accuracy = 0.1)
+  ),
+  hoverinfo = "text"
+) |>
+  plotly::layout(
+    title = "Capacidad municipal e intervenciones por departamento",
+    xaxis = list(title = "Efectivos de serenazgo", type = "log"),
+    yaxis = list(title = "Intervenciones registradas", type = "log"),
+    legend = list(orientation = "h", x = 0, y = -0.2)
+  )
+```
+
+El bubble plot permite ver tres dimensiones a la vez: efectivos, intervenciones y cámaras. Con `plotly`, el gráfico se vuelve interactivo y permite consultar cada departamento. Usamos `plot_ly()` directamente porque suele ser más estable que convertir un gráfico complejo desde `ggplot2`.
+
+Sin embargo, este bloque solo se activará en el renderizado HTML por motivos de compatibilidad.
+
+### Heatmap de intervenciones
+
+Pregunta: ¿qué tipos de intervención pesan más dentro de cada departamento?
+
+```{r}
+intervenciones_larga |>
+  group_by(departamento, tipo_intervencion) |>
+  summarise(
+    intervenciones = sum(intervenciones, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  group_by(departamento) |>
+  mutate(participacion = intervenciones / sum(intervenciones, na.rm = TRUE)) |>
+  ungroup() |>
+  semi_join(
+    intervenciones_departamento |> slice_max(total_intervenciones, n = 12),
+    by = "departamento"
+  ) |>
+  ggplot(aes(
+    x = tipo_intervencion,
+    y = reorder(departamento, participacion),
+    fill = participacion
+  )) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  scale_fill_paletteer_c("viridis::rocket", labels = percent_format()) +
+  labs(
+    title = "Composición de intervenciones por departamento",
+    subtitle = "Heatmap de porcentajes dentro de cada departamento",
+    x = NULL,
+    y = NULL,
+    fill = "Participación"
+  ) +
+  tema_sesion() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+El heatmap ayuda cuando tenemos dos dimensiones categóricas. Aquí permite ver qué tipos de intervención pesan más dentro de cada departamento.
+
+### Correlograma de indicadores
+
+Pregunta: ¿qué indicadores municipales tienden a moverse juntos?
+
+```{r}
+indicadores_correlacion <- renamu_seguridad |>
+  transmute(
+    efectivos = p69_2_t,
+    autos_camionetas = p70a_1_1,
+    radios = p70a_6_1,
+    camaras = p70a_7_1,
+    camaras_operativas = p70a_7_2,
+    centrales = p70a_10_1,
+    chalecos = p70a_13_1,
+    intervenciones = total_intervenciones
+  )
+
+correlaciones <- cor(
+  indicadores_correlacion,
+  use = "pairwise.complete.obs"
+) |>
+  as.data.frame() |>
+  rownames_to_column("variable_1") |>
+  pivot_longer(
+    cols = -variable_1,
+    names_to = "variable_2",
+    values_to = "correlacion"
+  )
+
+correlaciones |>
+  mutate(color_texto = if_else(abs(correlacion) > 0.55, "white", "black")) |>
+  ggplot(aes(x = variable_1, y = variable_2, fill = correlacion)) +
+  geom_tile(color = "white", linewidth = 0.25) +
+  geom_text(
+    aes(label = number(correlacion, accuracy = 0.01), color = color_texto),
+    size = 2.8
+  ) +
+  scale_fill_gradient2(
+    low = "#b56576",
+    mid = "white",
+    high = "#2f6f73",
+    midpoint = 0,
+    limits = c(-1, 1)
+  ) +
+  scale_color_identity() +
+  labs(
+    title = "Correlograma de indicadores municipales",
+    x = NULL,
+    y = NULL,
+    fill = "Correlación"
+  ) +
+  tema_sesion() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+El correlograma resume relaciones lineales entre variables numéricas. En esta sesión lo usamos como exploración, no como evidencia causal.
+
+### Dispersión y densidad 2D
+
+Pregunta: ¿hay relación entre tener más cámaras operativas y registrar más intervenciones?
+
+```{r}
+datos_camaras_intervenciones <- renamu_seguridad |>
+  filter(
+    !is.na(p70a_7_2),
+    p70a_7_2 > 0,
+    total_intervenciones > 0
+  )
+
+grafico_dispersion <- datos_camaras_intervenciones |>
+  ggplot(aes(x = p70a_7_2, y = total_intervenciones)) +
+  geom_point(alpha = 0.45, color = "#2f6f73") +
+  geom_smooth(method = "lm", se = FALSE, color = "#b56576", linewidth = 0.8) +
+  scale_x_log10(labels = comma_format()) +
+  scale_y_log10(labels = comma_format()) +
+  labs(
+    title = "Scatter plot",
+    subtitle = "Cada punto es una municipalidad",
+    x = "Cámaras operativas",
+    y = "Intervenciones registradas"
+  ) +
+  tema_sesion()
+
+grafico_densidad_2d <- datos_camaras_intervenciones |>
+  ggplot(aes(x = p70a_7_2, y = total_intervenciones)) +
+  stat_density_2d(
+    aes(fill = after_stat(level)),
+    geom = "polygon",
+    alpha = 0.75
+  ) +
+  geom_point(alpha = 0.15, size = 0.8, color = "white") +
+  scale_x_log10(labels = comma_format()) +
+  scale_y_log10(labels = comma_format()) +
+  scale_fill_paletteer_c("viridis::mako", guide = "none") +
+  labs(
+    title = "Densidad 2D",
+    subtitle = "Zonas donde se concentran más municipalidades",
+    x = "Cámaras operativas",
+    y = "Intervenciones registradas"
+  ) +
+  tema_sesion()
+
+grafico_dispersion + grafico_densidad_2d
+```
+
+El scatter muestra casos individuales; la densidad 2D muestra dónde se agrupan. Cuando hay muchos puntos y una cola larga, mirar ambas versiones evita sobreinterpretar casos extremos.
+
+### Treemap de intervenciones
+
+Pregunta: ¿qué tipos de intervención ocupan la mayor parte del total registrado?
+
+```{r}
+intervenciones_tipo |>
+  mutate(
+    etiqueta = str_replace_all(tipo_intervencion, "_", " "),
+    etiqueta = str_to_sentence(etiqueta)
+  ) |>
+  ggplot(aes(
+    area = intervenciones,
+    fill = tipo_intervencion,
+    label = etiqueta
+  )) +
+  treemapify::geom_treemap(color = "white", linewidth = 0.8) +
+  treemapify::geom_treemap_text(
+    color = "white",
+    place = "center",
+    grow = TRUE,
+    reflow = TRUE,
+    min.size = 6
+  ) +
+  scale_fill_paletteer_d("ggsci::category20_d3", guide = "none") +
+  labs(
+    title = "Treemap de intervenciones registradas",
+    subtitle = "El tamaño de cada rectángulo representa el volumen de intervenciones"
+  ) +
+  tema_sesion() +
+  theme(
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  )
+```
+
+El treemap funciona para mostrar partes de un total cuando hay varias categorías. Es menos preciso que una barra ordenada, pero ayuda a comunicar concentración.
+
+### Heatmap de recursos categóricos
+
+Pregunta: ¿qué tan frecuente es que una municipalidad tenga central de videovigilancia y chalecos antibalas al mismo tiempo?
+
+```{r}
+renamu_seguridad |>
+  mutate(
+    central = etiquetar_si_no(p70_10),
+    chaleco = etiquetar_si_no(p70_13)
+  ) |>
+  filter(central %in% c("Sí", "No"), chaleco %in% c("Sí", "No")) |>
+  count(central, chaleco, name = "municipalidades") |>
+  group_by(central) |>
+  mutate(porcentaje_fila = municipalidades / sum(municipalidades)) |>
+  ungroup() |>
+  mutate(color_texto = if_else(municipalidades < 500, "white", "black")) |>
+  ggplot(aes(x = chaleco, y = central, fill = municipalidades)) +
+  geom_tile(color = "white", linewidth = 0.8) +
+  geom_text(
+    aes(
+      label = str_c(
+        comma(municipalidades),
+        "\n",
+        percent(porcentaje_fila, accuracy = 0.1)
+      ),
+      color = color_texto
+    ),
+    size = 3.6
+  ) +
+  scale_fill_paletteer_c("viridis::rocket", labels = comma_format()) +
+  scale_color_identity() +
+  labs(
+    title = "Cruce entre central de videovigilancia y chalecos",
+    subtitle = "Conteos y porcentajes dentro de cada fila",
+    x = "Tiene chalecos antibalas",
+    y = "Tiene central de videovigilancia",
+    fill = "Municipalidades"
+  ) +
+  tema_sesion()
+```
+
+Este heatmap trabaja con dos variables categóricas. Es una forma compacta de leer combinaciones, no solo porcentajes separados.
+
+### Base complementaria de celulares
+
+Pregunta: ¿en qué departamentos se concentran los registros de robo de celular de la base complementaria?
+
+```{r}
+preparar_base_celular()
+
+celular_departamento <- base_celular |>
+  count(dpto_hecho_new, sort = TRUE, name = "denuncias") |>
+  filter(!is.na(dpto_hecho_new)) |>
+  slice_max(denuncias, n = 15)
+
+celular_departamento |>
+  ggplot(aes(x = denuncias, y = reorder(dpto_hecho_new, denuncias))) +
+  geom_col(fill = "#577590") +
+  scale_x_continuous(labels = comma_format()) +
+  labs(
+    title = "Registros de robo de celular por departamento",
+    subtitle = "Base complementaria SIDPOL",
+    x = "Registros",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+Esta visualización usa una base complementaria para practicar ranking con registros policiales. La lectura es descriptiva: muestra concentración territorial de los registros disponibles.
+
+Pregunta: ¿la edad de las personas registradas cambia según sexo?
+
+```{r}
+base_celular |>
+  filter(
+    sexo %in% c("Mujer", "Hombre"),
+    !is.na(edad),
+    edad >= 10,
+    edad <= 90
+  ) |>
+  ggplot(aes(x = edad, fill = sexo, color = sexo)) +
+  geom_density(alpha = 0.35, linewidth = 0.8) +
+  scale_fill_manual(values = c("Mujer" = "#b56576", "Hombre" = "#577590")) +
+  scale_color_manual(values = c("Mujer" = "#b56576", "Hombre" = "#577590")) +
+  labs(
+    title = "Distribución de edad en registros de robo de celular",
+    subtitle = "Densidad por sexo",
+    x = "Edad",
+    y = "Densidad",
+    fill = NULL,
+    color = NULL
+  ) +
+  tema_sesion()
+```
+
+La densidad por sexo permite comparar formas de distribución, no solo promedios. Aquí interesa ver si las edades se concentran en rangos similares o distintos.
+
+### Serie temporal con archivo complementario
+
+Pregunta: ¿cómo evolucionan algunos indicadores operativos a lo largo del tiempo?
+
+```{r}
+preparar_data_prepara()
+
+variables_tiempo <- c(
+  "OPERATIVOS",
+  "ARMAS DE FUEGO",
+  "DETENIDOS DIVERSOS DELITOS (PERUANOS)",
+  "MARIHUANA (KILOS)"
+)
+
+serie_tiempo <- data_prepara |>
+  filter(variable %in% variables_tiempo) |>
+  group_by(fecha, variable) |>
+  summarise(valor = sum(valor, na.rm = TRUE), .groups = "drop") |>
+  mutate(
+    variable_grafico = recode(
+      variable,
+      "DETENIDOS DIVERSOS DELITOS (PERUANOS)" = "DETENIDOS\nPERUANOS"
+    )
+  )
+
+serie_tiempo |>
+  ggplot(aes(x = fecha, y = valor, color = variable)) +
+  geom_line(linewidth = 0.9, show.legend = FALSE) +
+  geom_point(size = 1.4, show.legend = FALSE) +
+  facet_wrap(~variable_grafico, scales = "free_y", ncol = 2) +
+  scale_x_date(date_breaks = "6 months", date_labels = "%Y-%m") +
+  scale_y_continuous(labels = comma_format()) +
+  scale_color_paletteer_d("MetBrewer::Johnson") +
+  labs(
+    title = "Evolución mensual de indicadores complementarios",
+    subtitle = "Archivo data_prepara.xlsx",
+    x = NULL,
+    y = "Valor registrado"
+  ) +
+  tema_sesion() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Los gráficos de línea son adecuados cuando hay una dimensión temporal. Aquí el objetivo es mostrar evolución, estacionalidad y posibles picos.
+
+Pregunta: ¿las series tienen patrones temporales parecidos aunque estén en escalas distintas?
+
+```{r}
+serie_tiempo |>
+  group_by(variable) |>
+  mutate(indice = valor / max(valor, na.rm = TRUE)) |>
+  ungroup() |>
+  ggplot(aes(x = fecha, y = indice, fill = variable)) +
+  geom_area(alpha = 0.65, position = "identity", show.legend = FALSE) +
+  facet_wrap(~variable_grafico, ncol = 2) +
+  scale_x_date(date_breaks = "6 months", date_labels = "%Y-%m") +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_paletteer_d("MetBrewer::Johnson") +
+  labs(
+    title = "Área normalizada por indicador",
+    subtitle = "Cada serie se expresa como porcentaje de su propio máximo",
+    x = NULL,
+    y = "Índice"
+  ) +
+  tema_sesion() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text = element_text(size = 9.5)
+  )
+```
+
+El área normalizada no compara magnitudes absolutas, sino patrones de evolución. Es útil cuando las variables tienen escalas muy distintas.
+
+## Diccionario mínimo de trabajo
+
+```{r}
+diccionario_sesion_3 <- tibble(
+  variable = c(
+    "ubigeo",
+    "departamento",
+    "provincia",
+    "distrito",
+    "tipo_municipalidad",
+    "p69_2",
+    "p69_2_t",
+    "p70_7",
+    "p70a_7_1",
+    "p70a_7_2",
+    "p70a_7_4",
+    "p70_10",
+    "total_intervenciones"
+  ),
+  descripcion = c(
+    "Código territorial de seis dígitos.",
+    "Departamento de la municipalidad.",
+    "Provincia de la municipalidad.",
+    "Distrito de la municipalidad.",
+    "Tipo de municipalidad: provincial o distrital.",
+    "Indica si la municipalidad brindó serenazgo al 31 de marzo de 2025.",
+    "Total de efectivos de serenazgo al 31 de marzo de 2025.",
+    "Indica si la municipalidad dispone de cámaras de videovigilancia.",
+    "Total de cámaras de videovigilancia.",
+    "Cámaras de videovigilancia operativas.",
+    "Cámaras operativas integradas a la PNP.",
+    "Indica si el serenazgo dispone de central de control de videovigilancia.",
+    "Suma de intervenciones registradas por serenazgo en las categorías P71."
+  ),
+  fuente = "RENAMU 2025"
+)
+
+diccionario_sesion_3
+```
+
+El diccionario mínimo traduce códigos de cuestionario a variables interpretables. Esta práctica evita que el análisis dependa de memoria o de nombres crípticos.
+
+## Exportar resultados
+
+```{r}
+base_renamu_seguridad <- renamu_seguridad |>
+  select(
+    ano,
+    ubigeo,
+    departamento,
+    provincia,
+    distrito,
+    tipo_municipalidad,
+    serenazgo_2024,
+    serenazgo_2025,
+    p69_2_t,
+    p69_2_m,
+    p69_2_h,
+    tiene_auto_camioneta,
+    p70a_1_1,
+    p70a_1_2,
+    p70a_1_3,
+    tiene_radio,
+    p70a_6_1,
+    p70a_6_2,
+    p70a_6_3,
+    tiene_camaras,
+    p70a_7_1,
+    p70a_7_2,
+    p70a_7_3,
+    p70a_7_4,
+    tiene_central_videovigilancia,
+    p70a_10_1,
+    p70a_10_2,
+    p70a_10_3,
+    tiene_chaleco_antibalas,
+    p70a_13_1,
+    total_intervenciones
+  )
+
+indicadores_departamento <- renamu_seguridad |>
+  group_by(departamento) |>
+  summarise(
+    municipalidades = n(),
+    con_serenazgo = sum(p69_2 == 1, na.rm = TRUE),
+    porcentaje_serenazgo = con_serenazgo / municipalidades,
+    efectivos_serenazgo = sum(p69_2_t, na.rm = TRUE),
+    con_camaras = sum(p70_7 == 1, na.rm = TRUE),
+    total_camaras = sum(p70a_7_1, na.rm = TRUE),
+    camaras_operativas = sum(p70a_7_2, na.rm = TRUE),
+    intervenciones_serenazgo = sum(total_intervenciones, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+write_csv(
+  base_renamu_seguridad,
+  file.path(ruta_resultados, "base_sesion3.csv")
+)
+
+write_csv(
+  indicadores_departamento,
+  file.path(ruta_resultados, "indicadores_sesion3.csv")
+)
+
+write_csv(
+  diccionario_sesion_3,
+  file.path(ruta_resultados, "diccionario_sesion3.csv")
+)
+```
+
+La exportación deja una base municipal simplificada, un resumen departamental y un diccionario mínimo. Esos productos pueden reutilizarse para tareas o para sesiones posteriores.
+
+## Ejercicios para seguir practicando
+
+1.  Identificar los cinco departamentos con mayor porcentaje de municipalidades con serenazgo.
+2.  Calcular el porcentaje de cámaras operativas por departamento.
+3.  Encontrar municipalidades que declaran tener cámaras, pero registran cero cámaras operativas.
+4.  Comparar la mediana de intervenciones entre municipalidades provinciales y distritales.
+5.  Crear un gráfico de barras con los tres tipos de intervención más frecuentes.
+6.  Revisar si las municipalidades con central de videovigilancia tienen más cámaras operativas.
+7.  Exportar una base solo con municipalidades de Lima Metropolitana o Callao.
+
+Estos ejercicios pueden apoyarse en el Posit Assistant de RStudio para revisar errores, pedir explicaciones de código y explorar alternativas de limpieza o visualización.

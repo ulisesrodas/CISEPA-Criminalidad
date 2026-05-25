@@ -1,0 +1,14 @@
+variable,descripcion,fuente
+ubigeo,Código territorial de seis dígitos.,RENAMU 2025
+departamento,Departamento de la municipalidad.,RENAMU 2025
+provincia,Provincia de la municipalidad.,RENAMU 2025
+distrito,Distrito de la municipalidad.,RENAMU 2025
+tipo_municipalidad,Tipo de municipalidad: provincial o distrital.,RENAMU 2025
+p69_2,Indica si la municipalidad brindó serenazgo al 31 de marzo de 2025.,RENAMU 2025
+p69_2_t,Total de efectivos de serenazgo al 31 de marzo de 2025.,RENAMU 2025
+p70_7,Indica si la municipalidad dispone de cámaras de videovigilancia.,RENAMU 2025
+p70a_7_1,Total de cámaras de videovigilancia.,RENAMU 2025
+p70a_7_2,Cámaras de videovigilancia operativas.,RENAMU 2025
+p70a_7_4,Cámaras operativas integradas a la PNP.,RENAMU 2025
+p70_10,Indica si el serenazgo dispone de central de control de videovigilancia.,RENAMU 2025
+total_intervenciones,Suma de intervenciones registradas por serenazgo en las categorías P71.,RENAMU 2025
