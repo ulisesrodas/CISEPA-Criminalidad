@@ -1,33 +1,38 @@
-# Análisis descriptivo municipal
+# Análisis Descriptivo Municipal (RENAMU): Recursos y Seguridad Ciudadana
 
-Esta carpeta contiene todos los archivos necesarios para trabajar en RStudio (o Positron) y en SPSS.
+Este repositorio contiene los scripts y reportes del análisis exploratorio basado en el Registro Nacional de Municipalidades (RENAMU) del INEI. El objetivo principal de este proyecto es procesar, limpiar y explorar estadísticamente la información sobre los recursos logísticos y humanos que los gobiernos locales destinan a la seguridad ciudadana y gestión municipal.
 
-Esta version incluye una seccion ampliada de visualizaciones con `ggplot2`, `plotly`, `patchwork`, `hrbrthemes`, `paletteer`, `ggridges` y `ggbeeswarm`.
+## 📄 Archivos Principales del Proyecto
 
-## Como usar
+La carpeta se compone del código fuente documentado y sus respectivas salidas renderizadas para facilitar su lectura e interactividad:
 
-1. Descargar todos los archivos de esta carpeta.
-2. Abrir `analisis_descriptivo_municipal.qmd` en RStudio.
-3. Ejecutar primero los bloques:
-   - Instalar paquetes
-   - Activar paquetes
-   - Ubicar archivos
-4. Luego ejecutar el resto del documento por secciones o usar `Render`.
-5. Si se prefiere, en vez de ejecutar por secciones, se puede usar `Render` para ejecutar todo de una vez y visualizar el HTML final
+* **`analisis descriptivo municipal.qmd`**: El script principal de Quarto. Contiene todo el flujo de trabajo en R: desde la importación de las bases de datos del INEI hasta la limpieza, manejo de valores perdidos y generación de visualizaciones.
+* **`analisis_descriptivo_municipal.html`**: Reporte dinámico y renderizado del análisis. Ideal para revisar las tablas, leer el código y explorar los gráficos de manera interactiva directamente en el navegador web.
+* **`analisis-descriptivo-municipal.pdf`**: Versión estática y formal del documento, optimizada para la lectura lineal, revisión metodológica y fácil distribución.
 
-## Archivos principales
+## 🎯 Objetivos del Proyecto
 
-- `analisis_descriptivo_municipal.qmd`: Documento principal en formato Quarto.
-- `analisis_descriptivo_municipal`: Disponible en HTML y pdf.
-- `renamu2025.csv`: Base RENAMU 2025.
-- `Base-Datos_2025_f_.sav`: Base RENAMU 2025 en formato para SPSS, extraída de Microdatos del INEI.
-- `dict_renamu2025.pdf`: diccionario de variables de RENAMU 2025.
+* **Importación y Limpieza:** Carga estructurada de las bases de datos del RENAMU, estandarización de los nombres de las variables (usando `clean_names`) y manejo de caracteres especiales.
+* **Estandarización Territorial:** Tratamiento exhaustivo de la variable `ubigeo` (asegurando el formato de texto de 6 dígitos con ceros a la izquierda) para garantizar compatibilidad en futuras fusiones territoriales.
+* **Diagnóstico de Calidad:** Identificación de valores perdidos (NAs) y registros atípicos dentro de las variables de gestión municipal.
+* **Análisis de Recursos:** Exploración descriptiva de variables clave, como la cantidad de efectivos de Serenazgo, vehículos operativos, cámaras de videovigilancia y presupuesto destinado a seguridad por distrito.
+* **Visualización Descriptiva:** Elaboración de gráficos que permiten entender rápidamente la distribución, concentración y carencia de recursos municipales a nivel nacional.
 
-## Archivos complementarios
+## 📂 Fuentes de Datos Utilizadas
 
-- `Sintaxis1.sps`: Contiene los códigos para desplegar el análisis de tablas y gráficos en SPSS.
-- `Resultado1.spv`: Resultado de la sintaxis anterior.
-- `anexo8.xlsx`
-- `base_celular.xlsx`
-- `data_prepara.xlsx`
-- `robo_celular_sidpol.xlsx`
+El análisis emplea microdatos oficiales provenientes del **Instituto Nacional de Estadística e Informática (INEI)**:
+* **Bases de Datos RENAMU:** Archivos que recogen información declarada por las municipalidades provinciales y distritales, con un enfoque específico en los módulos de seguridad ciudadana y gestión local.
+* **Link**: [Microdatos INEI](https://proyectos.inei.gob.pe/microdatos/) y buscamos a RENAMU en las encuestas.
+
+## 🛠️ Tecnologías y Paquetes de R
+
+Todo el ecosistema de análisis se construyó en **R** utilizando **Quarto** (`.qmd`) para asegurar una investigación completamente reproducible.
+* **Manipulación, limpieza y estandarización:** `tidyverse` (dplyr, tidyr, stringr), `janitor`, `here`.
+* **Diagnóstico exploratorio:** Paquetes para la rápida detección de estructura y valores faltantes (`skimr`, `naniar`, `DataExplorer`).
+* **Gráficos e interacción:** `ggplot2` para las visualizaciones base, `scales` para el formato de ejes y `plotly` para volver los gráficos interactivos en la versión web.
+
+## 📦 Entregables y Resultados Generados
+
+El pipeline de trabajo exporta información limpia y lista para la toma de decisiones o cruces posteriores:
+1.  **Tablas Resumen:** Agrupaciones consolidadas por departamento, provincia y distrito sobre la capacidad logística municipal.
+2.  **Reportes Finales:** Documentos renderizados (`.html` y `.pdf`) que sirven como bitácora analítica y presentación formal de los hallazgos.
