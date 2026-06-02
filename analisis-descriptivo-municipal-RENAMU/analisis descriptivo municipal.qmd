@@ -36,6 +36,13 @@ En esta sesión trabajaremos con registros municipales de seguridad ciudadana a 
 6.  Visualizar distribuciones de serenazgo, videovigilancia e intervenciones.
 7.  Exportar bases resumidas para ejercicios posteriores.
 
+```{r}
+#| include: false
+# Instrucción para renderizar en r: 
+# Copiar el código y ejecutarlo en la terminal directamente
+# quarto render "bases de datos policiales.qmd" --to pdf
+```
+
 ## Preparación
 
 Si ejecutas este documento por partes, corre primero los chunks de **Instalar paquetes**, **Activar paquetes** y **Ubicar archivos**. Los tres están ocultos en el redenrizado final, pero esos bloques crean los paquetes, funciones y rutas que usan los demás chunks
