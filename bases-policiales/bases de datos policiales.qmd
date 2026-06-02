@@ -1,5 +1,5 @@
 ---
-title: "Gestión de bases de datos policiales"
+title: "Bases de datos policiales"
 subtitle: "Importación, limpieza, diagnóstico, uniones y primeras visualizaciones"
 author: "Noam López Villanes"
 date: 2026-05-13
@@ -36,10 +36,16 @@ En esta sesión trabajaremos con bases reales de información policial. El objet
 6.  Fusionar bases de datos con `left_join()`.
 7.  Elaborar primeras visualizaciones exploratorias.
 
+```{r}
+#| include: false
+# Instrucción para renderizar en r: 
+# Copiar el código y ejecutarlo en la terminal directamente
+# quarto render "bases de datos policiales.qmd" --to pdf
+```
+
 ## Preparación
 
 Si ejecutas este documento por partes, corre primero los chunks de **Instalar paquetes**, **Activar paquetes** y **Ubicar archivos**. Los tres están ocultos en el redenrizado final, pero esos bloques crean los paquetes, funciones y rutas que usan los demás chunks.
-
 
 ```{r}
 #| include: false
@@ -80,7 +86,6 @@ if (length(paquetes_faltantes) > 0) {
   )
 }
 ```
-
 
 ```{r}
 #| include: false
@@ -158,8 +163,6 @@ tema_sesion <- function() {
     )
 }
 ```
-
-
 
 ```{r}
 #| include: false
@@ -1387,7 +1390,7 @@ Estos ejercicios pueden apoyarse en el Posit Assistant de RStudio para revisar e
 
 ### Ejercicio 1: Gráfico interactivo con plotly
 
-Usamos `plotly` para crear un gráfico interactivo que muestre la relación entre denuncias y comisarías por distrito. Este tipo de gráfico permite explorar los datos de manera dinámica, mostrando información detallada al pasar el cursor sobre cada punto. 
+Usamos `plotly` para crear un gráfico interactivo que muestre la relación entre denuncias y comisarías por distrito. Este tipo de gráfico permite explorar los datos de manera dinámica, mostrando información detallada al pasar el cursor sobre cada punto.
 
 Sin embargo, no será visible en el PDF generado, ya que `plotly` está diseñado para entornos HTML. Para verlo, es necesario ejecutar el bloque de código en RStudio, Positron o renderizar el documento en formato HTML.
 
