@@ -38,9 +38,9 @@ En esta sesión trabajaremos con registros municipales de seguridad ciudadana a 
 
 ```{r}
 #| include: false
-# Instrucción para renderizar en r: 
+# Instrucción para renderizar PDF en r: 
 # Copiar el código y ejecutarlo en la terminal directamente
-# quarto render "bases de datos policiales.qmd" --to pdf
+# quarto render "analisis descriptivo municipal.qmd" --to pdf
 ```
 
 ## Preparación
