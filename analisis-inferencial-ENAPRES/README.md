@@ -1,6 +1,6 @@
-# Análisis Inferencial de Criminalidad y Victimización (ENAPRES) 🇵🇪
+# Análisis Inferencial de Criminalidad y Victimización (ENAPRES)
 
-Este proyecto contiene un flujo de trabajo analítico (ETL y modelamiento) diseñado para procesar, visualizar y analizar estadísticamente los microdatos de la Encuesta Nacional de Programas Estratégicos (ENAPRES) del INEI, enfocándose en el módulo de seguridad ciudadana (2010-2025).
+Este proyecto contiene un flujo de trabajo analítico (ETL y modelamiento) diseñado para procesar, visualizar y analizar estadísticamente los microdatos de la Encuesta Nacional de Programas Presupuestales (ENAPRES) del INEI [Link](https://proyectos.inei.gob.pe/microdatos/), enfocándose en el módulo de seguridad ciudadana (2010-2025).
 
 El objetivo principal es reconstruir series de tiempo comparables y aplicar estadística inferencial para entender las dinámicas de la victimización, la percepción de inseguridad y la confianza institucional en el Perú.
 
@@ -15,9 +15,9 @@ El objetivo principal es reconstruir series de tiempo comparables y aplicar esta
 
 El repositorio está estructurado para separar el procesamiento pesado de la generación de reportes, optimizando la memoria y garantizando la reproducibilidad:
 
-1. **Insumos (Microdatos INEI):** Archivos originales en `.sav` (SPSS). *Nota: Por buenas prácticas y tamaño, estos archivos están ignorados en el control de versiones mediante `.gitignore`.*
-2. **Procesamiento de Datos (`procesar_enapres_mod600.R`):** El "motor" del proyecto. Este script lee las encuestas originales, filtra universos válidos, aplica factores de expansión y transforma las variables del cuestionario en indicadores binarios limpios. Exporta los resultados consolidados en formato `.csv` y `.sav`.
-3. **Análisis y Reporte (`ENAPRES inferencia.qmd`):** El documento final. Importa los indicadores ya calculados y ejecuta el análisis exploratorio de datos (EDA) territorial y longitudinal.
+1. **Insumos (Microdatos INEI):** Archivos originales en `.sav` (SPSS) del 2010 al 2025. Se descargan manualmente con el link brindado. *Nota: Por buenas prácticas y tamaño, estos archivos están ignorados mediante `.gitignore`.*
+2. **Procesamiento de Datos (`procesar_enapres_mod600.R`):** El "motor" del proyecto. Este script lee las encuestas originales, filtra universos válidos, aplica factores de expansión y transforma las variables del cuestionario en indicadores binarios limpios. Exporta los resultados consolidados en formato `.csv` y `.sav`. *Nota: uno de los archivos `.sav` resultantes es muy pesado, por lo que también se ignora mediante el `.gitignore`.*
+3. **Análisis y Reporte (`ENAPRES inferencia.qmd`):** El documento final. Importa los indicadores ya calculados y ejecuta el análisis exploratorio de datos (EDA) territorial y longitudinal. Los outputs del qmd están aquí en formato HTML y pdf para su visualización.
 
 ## 📊 Principales Análisis Incluidos
 
