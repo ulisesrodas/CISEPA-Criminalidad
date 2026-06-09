@@ -38,7 +38,7 @@ En esta sesión trabajaremos con bases reales de información policial. El objet
 
 ```{r}
 #| include: false
-# Instrucción para renderizar en r: 
+# Instrucción para renderizar PDF en r: 
 # Copiar el código y ejecutarlo en la terminal directamente
 # quarto render "bases de datos policiales.qmd" --to pdf
 ```
