@@ -1,0 +1,13 @@
+# ==============================================================================
+# IGNORAR TODOS LOS ARCHIVOS DE DATOS (INSUMOS Y RESULTADOS)
+# ==============================================================================
+# Bloquea absolutamente cualquier archivo de datos SPSS o Excel/CSV por ser muy pesados
+*.sav
+*.csv
+
+# ==============================================================================
+# IGNORAR CACHÉ Y TEMPORALES DE QUARTO
+# ==============================================================================
+# Recomendado pese a que el archivo HTML es autocontenido
+.quarto/
+*_files/
