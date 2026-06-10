@@ -1,0 +1,612 @@
+---
+title: "Análisis de conglomerados"
+subtitle: "Clustering, perfiles penitenciarios y aprendizaje no supervisado"
+author: "Noam López Villanes"
+date: 2026-05-17
+date-format: "D [de] MMMM [de] YYYY"
+lang: es
+format:
+  html:
+    embed-resources: true
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    df-print: paged
+  pdf:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    prefer-html: true
+execute:
+  warning: false
+  message: false
+editor: visual
+---
+
+## Objetivo de la sesión
+
+En esta sesión trabajaremos con una base de población penitenciaria para introducir el **análisis de conglomerados**. A diferencia de una regresión o una prueba de hipótesis, aquí no partimos de una variable dependiente. El objetivo es encontrar grupos de casos que se parezcan entre sí según ciertas características observadas.
+
+1.  Preparar variables para un análisis de clustering.
+2.  Distinguir variables numéricas, categóricas y mixtas.
+3.  Escalar variables para que sean comparables.
+4.  Aplicar k-means e interpretar centroides.
+5.  Comparar resultados con clustering jerárquico y DBSCAN.
+6.  Usar PAM con distancia de Gower para variables mixtas.
+7.  Traducir los clústeres en perfiles interpretables.
+
+```{r}
+#| include: false
+# Instrucción para renderizar PDF:
+# Copiar el código y ejecutarlo en la terminal directamente
+# quarto render "analisis de conglomerados.qmd" --to pdf
+```
+
+## Preparación
+
+Si ejecutas este documento por partes, corre primero los chunks de **Instalar paquetes**, **Activar paquetes** y **Ubicar archivos**. Los tres están ocultos en el redenrizado final, pero esos bloques crean los paquetes, funciones y rutas que usan los demás chunks.
+
+```{r}
+#| include: false
+# INSTALAR PAQUETES
+paquetes <- c(
+  # Manipulación y visualización.
+  "tidyverse",
+  # Lectura de nombres limpios.
+  "janitor",
+  # Métodos de clustering y distancias.
+  "cluster",
+  # Clustering basado en densidad.
+  "dbscan",
+  # Paletas de color.
+  "paletteer",
+  # Formatos de porcentajes y etiquetas.
+  "scales",
+  # Combinar gráficos.
+  "patchwork",
+  # Exportar resultados.
+  "readr"
+)
+
+paquetes_faltantes <- paquetes[!paquetes %in% rownames(installed.packages())]
+
+if (length(paquetes_faltantes) > 0) {
+  install.packages(
+    paquetes_faltantes,
+    repos = "https://packagemanager.posit.co/cran/latest"
+  )
+}
+```
+
+```{r}
+#| include: false
+# ACTIVAR PAQUETES
+library(tidyverse)
+library(janitor)
+library(cluster)
+library(dbscan)
+library(paletteer)
+library(scales)
+library(patchwork)
+library(readr)
+
+resolver_ruta_sesion <- function() {
+  candidatos <- c(
+    getwd(),
+    if (requireNamespace("rstudioapi", quietly = TRUE) &&
+        rstudioapi::isAvailable()) {
+      dirname(rstudioapi::getActiveDocumentContext()$path)
+    } else {
+      NA_character_
+    },
+    if (!is.null(knitr::current_input())) {
+      dirname(normalizePath(knitr::current_input(), mustWork = FALSE))
+    } else {
+      NA_character_
+    }
+  )
+
+  candidatos <- candidatos[!is.na(candidatos) & nzchar(candidatos)]
+  candidatos <- unique(normalizePath(candidatos, mustWork = FALSE))
+
+  ruta_valida <- candidatos[
+    file.exists(file.path(candidatos, "pope.csv"))
+  ]
+
+  if (length(ruta_valida) == 0) {
+    stop(
+      "No encuentro pope.csv. Abre o ejecuta este QMD desde la carpeta de la Sesión 5."
+    )
+  }
+
+  ruta_valida[1]
+}
+
+knitr::opts_chunk$set(
+  fig.width = 9.5,
+  fig.height = 6,
+  fig.align = "center",
+  out.width = "95%"
+)
+
+tema_sesion <- function() {
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold", size = 15),
+      plot.subtitle = element_text(size = 11, color = "grey30"),
+      axis.title = element_text(size = 11),
+      axis.text = element_text(color = "grey25"),
+      panel.grid.minor = element_blank(),
+      legend.position = "bottom"
+    )
+}
+```
+
+```{r}
+#| include: false
+# UBICAR ARCHIVOS
+ruta_sesion <- resolver_ruta_sesion()
+ruta_datos <- ruta_sesion
+ruta_resultados <- ruta_sesion
+
+archivo_pope <- file.path(ruta_datos, "pope.csv")
+archivo_pope
+```
+
+## Importar y conocer la base
+
+¿Qué información trae la base de población penitenciaria?
+
+```{r}
+pope <- read_delim(
+  archivo_pope,
+  delim = ";",
+  locale = locale(encoding = "Latin1"),
+  show_col_types = FALSE
+) |>
+  clean_names() |>
+  mutate(
+    sexo = str_to_sentence(sexo),
+    delito_generico = str_squish(delito_generico),
+    delito_especifico = str_squish(delito_especifico),
+    situacion_juridica = str_to_sentence(str_squish(situacion_juridica)),
+    departamento = str_to_title(departamento),
+    edad = as.numeric(edad),
+    no_de_ingresos = as.numeric(no_de_ingresos)
+  )
+
+glimpse(pope)
+```
+
+La base registra personas privadas de libertad y contiene variables sociodemográficas, jurídicas y penitenciarias. Para clustering debemos elegir variables que tengan sentido sustantivo y que puedan compararse técnicamente.
+
+¿Cuántos casos tenemos y qué rangos observamos?
+
+```{r}
+pope |>
+  summarise(
+    personas = n(),
+    edad_minima = min(edad, na.rm = TRUE),
+    edad_maxima = max(edad, na.rm = TRUE),
+    maximo_ingresos = max(no_de_ingresos, na.rm = TRUE),
+    delitos_genericos = n_distinct(delito_generico),
+    penales = n_distinct(nombre_del_penal),
+    departamentos = n_distinct(departamento)
+  )
+```
+
+Esta primera revisión ayuda a evitar errores de interpretación. Por ejemplo, edad y número de ingresos son numéricas, pero sexo, delito genérico y situación jurídica son categóricas.
+
+## Exploración inicial
+
+¿Cómo se distribuye la edad de la población penitenciaria?
+
+```{r}
+pope |>
+  ggplot(aes(x = edad)) +
+  geom_histogram(binwidth = 5, fill = "#577590", color = "white", boundary = 0) +
+  scale_x_continuous(breaks = seq(15, 100, by = 10)) +
+  labs(
+    title = "Distribución de edad",
+    subtitle = "Población penitenciaria registrada en la base POPE",
+    x = "Edad",
+    y = "Personas"
+  ) +
+  tema_sesion()
+```
+
+La edad es una variable numérica de razón. En clustering, una variable numérica con escala amplia puede dominar el cálculo de distancias si no la estandarizamos.
+
+¿Qué delitos genéricos son más frecuentes?
+
+```{r}
+pope |>
+  count(delito_generico, sort = TRUE) |>
+  slice_head(n = 10) |>
+  ggplot(aes(x = n, y = reorder(delito_generico, n))) +
+  geom_col(fill = "#ef476f", width = 0.7) +
+  geom_text(aes(label = comma(n)), hjust = -0.12, size = 3.2) +
+  scale_x_continuous(labels = comma_format(), expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title = "Delitos genéricos más frecuentes",
+    x = "Personas",
+    y = NULL
+  ) +
+  tema_sesion()
+```
+
+Las categorías más frecuentes son relevantes porque pueden aparecer como rasgos distintivos de algunos clústeres. Sin embargo, no conviene meter demasiadas categorías raras en una primera versión del ejercicio.
+
+¿Cómo se relacionan edad y número de ingresos?
+
+```{r}
+set.seed(123)
+pope_muestra <- pope |>
+  filter(!is.na(edad), !is.na(no_de_ingresos)) |>
+  slice_sample(n = min(10000, nrow(pope |> filter(!is.na(edad), !is.na(no_de_ingresos)))))
+
+pope_muestra |>
+  ggplot(aes(x = edad, y = no_de_ingresos)) +
+  geom_jitter(alpha = 0.18, width = 0.25, height = 0.12, color = "#3a86ff") +
+  scale_y_continuous(breaks = pretty_breaks()) +
+  labs(
+    title = "Edad y número de ingresos",
+    subtitle = "Muestra aleatoria para facilitar la visualización",
+    x = "Edad",
+    y = "Número de ingresos"
+  ) +
+  tema_sesion()
+```
+
+Esta relación es útil para introducir la idea de distancia: dos personas pueden parecerse porque tienen edad e historial de ingresos similares, aunque sus delitos o situación jurídica sean distintos.
+
+## Preparar variables para clustering
+
+¿Por qué debemos escalar las variables numéricas?
+
+```{r}
+datos_cluster <- pope |>
+  transmute(
+    id,
+    edad,
+    ingresos = no_de_ingresos,
+    sexo,
+    delito_generico,
+    situacion_juridica,
+    departamento,
+    nombre_del_penal
+  ) |>
+  filter(
+    !is.na(edad),
+    !is.na(ingresos),
+    edad >= 18,
+    ingresos >= 1
+  )
+
+variables_numericas <- datos_cluster |>
+  select(edad, ingresos)
+
+variables_escaladas <- variables_numericas |>
+  scale() |>
+  as_tibble()
+
+summary(variables_numericas)
+summary(variables_escaladas)
+```
+
+Escalar significa restar la media y dividir entre la desviación estándar. Después de escalar, edad e ingresos quedan en unidades comparables. Esto es clave para métodos como k-means, que usan distancias.
+
+## Elegir el número de clústeres
+
+¿Cuántos grupos deberíamos buscar?
+
+```{r}
+set.seed(123)
+k_posibles <- 1:8
+
+suma_cuadrados <- map_dfr(k_posibles, function(k) {
+  modelo <- kmeans(variables_escaladas, centers = k, nstart = 20)
+  tibble(k = k, wss = modelo$tot.withinss)
+})
+
+suma_cuadrados |>
+  ggplot(aes(x = k, y = wss)) +
+  geom_line(color = "#577590", linewidth = 0.9) +
+  geom_point(size = 2.8, color = "#577590") +
+  scale_x_continuous(breaks = k_posibles) +
+  scale_y_continuous(labels = comma_format()) +
+  labs(
+    title = "Método del codo",
+    subtitle = "Busca un punto donde agregar más clústeres deja de reducir mucho la variación interna",
+    x = "Número de clústeres",
+    y = "Suma de cuadrados dentro de clústeres"
+  ) +
+  tema_sesion()
+```
+
+El método del codo no da una respuesta automática. Ayuda a justificar una decisión. En clase usaremos `k = 4` porque permite diferenciar perfiles sin volver la interpretación demasiado fragmentada.
+
+## K-means
+
+¿Qué perfiles aparecen si agrupamos por edad e ingresos?
+
+```{r}
+set.seed(123)
+modelo_kmeans <- kmeans(variables_escaladas, centers = 4, nstart = 25)
+
+datos_kmeans <- datos_cluster |>
+  mutate(cluster_kmeans = factor(modelo_kmeans$cluster))
+
+datos_kmeans |>
+  group_by(cluster_kmeans) |>
+  summarise(
+    personas = n(),
+    porcentaje = personas / nrow(datos_kmeans),
+    edad_promedio = mean(edad, na.rm = TRUE),
+    ingresos_promedio = mean(ingresos, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+```{r}
+datos_kmeans |>
+  count(cluster_kmeans) |>
+  mutate(porcentaje = n / sum(n)) |>
+  ggplot(aes(x = cluster_kmeans, y = porcentaje, fill = cluster_kmeans)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = percent(porcentaje, accuracy = 0.1)), vjust = -0.35, size = 3.4) +
+  scale_y_continuous(labels = percent_format(), expand = expansion(mult = c(0, 0.12))) +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  labs(
+    title = "Tamaño de los clústeres k-means",
+    x = "Clúster",
+    y = "Porcentaje"
+  ) +
+  tema_sesion()
+```
+
+El tamaño de cada clúster nos dice si el modelo está produciendo grupos relativamente equilibrados o si separa casos muy específicos.
+
+¿Dónde se ubican los clústeres en el espacio edad-ingresos?
+
+```{r}
+centroides <- datos_kmeans |>
+  group_by(cluster_kmeans) |>
+  summarise(
+    edad = mean(edad, na.rm = TRUE),
+    ingresos = mean(ingresos, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+datos_kmeans |>
+  slice_sample(n = min(12000, nrow(datos_kmeans))) |>
+  ggplot(aes(x = edad, y = ingresos, color = cluster_kmeans)) +
+  geom_jitter(alpha = 0.22, width = 0.25, height = 0.12) +
+  geom_point(
+    data = centroides,
+    aes(x = edad, y = ingresos),
+    inherit.aes = FALSE,
+    shape = 4,
+    stroke = 1.4,
+    size = 5,
+    color = "black"
+  ) +
+  scale_color_paletteer_d("ggthemes::Tableau_10") +
+  labs(
+    title = "Clústeres k-means según edad e ingresos",
+    subtitle = "Las cruces negras son centroides",
+    x = "Edad",
+    y = "Número de ingresos",
+    color = "Clúster"
+  ) +
+  tema_sesion()
+```
+
+Los centroides muestran el promedio de edad e ingresos dentro de cada grupo. Esa comparación permite describir los perfiles con más precisión que el gráfico de dispersión por sí solo.
+
+¿Cómo podemos describir cada clúster?
+
+```{r}
+perfil_kmeans <- datos_kmeans |>
+  group_by(cluster_kmeans) |>
+  summarise(
+    personas = n(),
+    edad_promedio = mean(edad, na.rm = TRUE),
+    ingresos_promedio = mean(ingresos, na.rm = TRUE),
+    porcentaje_mujeres = mean(sexo == "Femenino", na.rm = TRUE),
+    delito_mas_frecuente = names(sort(table(delito_generico), decreasing = TRUE))[1],
+    situacion_mas_frecuente = names(sort(table(situacion_juridica), decreasing = TRUE))[1],
+    .groups = "drop"
+  ) |>
+  mutate(
+    porcentaje_mujeres = percent(porcentaje_mujeres, accuracy = 0.1)
+  )
+
+perfil_kmeans
+```
+
+Esta tabla convierte el resultado técnico en perfiles interpretables. Un clúster puede representar personas jóvenes con pocos ingresos, personas mayores con varios ingresos, u otros patrones según los datos.
+
+```{r}
+write_csv(
+  datos_kmeans,
+  file.path(ruta_resultados, "pope_clusters_kmeans.csv")
+)
+```
+
+## Clustering jerárquico
+
+¿Qué pasa si no fijamos centroides sino que unimos casos por similitud?
+
+```{r}
+set.seed(123)
+muestra_hc <- datos_cluster |>
+  slice_sample(n = min(1200, nrow(datos_cluster)))
+
+variables_hc <- muestra_hc |>
+  select(edad, ingresos) |>
+  scale()
+
+distancia_hc <- dist(variables_hc)
+modelo_hc <- hclust(distancia_hc, method = "complete")
+
+plot(
+  modelo_hc,
+  labels = FALSE,
+  main = "Dendrograma jerárquico",
+  xlab = "",
+  sub = ""
+)
+rect.hclust(modelo_hc, k = 4, border = "#ef476f")
+```
+
+El dendrograma muestra un proceso de agrupamiento. Al cortar el árbol en cuatro ramas, obtenemos cuatro grupos. La ventaja es que permite ver anidamientos; la desventaja es que puede volverse pesado con bases grandes.
+
+```{r}
+muestra_hc <- muestra_hc |>
+  mutate(cluster_hc = factor(cutree(modelo_hc, k = 4)))
+
+muestra_hc |>
+  ggplot(aes(x = edad, y = ingresos, color = cluster_hc)) +
+  geom_jitter(alpha = 0.5, width = 0.25, height = 0.12) +
+  scale_color_paletteer_d("ggthemes::Tableau_10") +
+  labs(
+    title = "Clústeres jerárquicos",
+    subtitle = "Muestra aleatoria usada para reducir el costo computacional",
+    x = "Edad",
+    y = "Número de ingresos",
+    color = "Clúster"
+  ) +
+  tema_sesion()
+```
+
+Este método sirve para discutir que no hay una única forma correcta de agrupar. Cada algoritmo define la similitud de manera distinta.
+
+## DBSCAN
+
+¿Podemos identificar grupos densos y casos atípicos?
+
+```{r}
+set.seed(123)
+muestra_dbscan <- datos_cluster |>
+  slice_sample(n = min(6000, nrow(datos_cluster)))
+
+variables_dbscan <- muestra_dbscan |>
+  select(edad, ingresos) |>
+  scale()
+
+kNNdistplot(variables_dbscan, k = 4)
+abline(h = 0.20, col = "#ef476f", lwd = 2)
+```
+
+El gráfico ordena las distancias al cuarto vecino más cercano. El tramo donde la curva empieza a subir con más fuerza sirve como referencia para escoger `eps`; aquí usamos `0.20` como valor inicial para discutir cuántos casos quedan como ruido y cuántos forman clústeres.
+
+```{r}
+modelo_dbscan <- dbscan(variables_dbscan, eps = 0.20, minPts = 5)
+
+muestra_dbscan <- muestra_dbscan |>
+  mutate(
+    cluster_dbscan = factor(
+      modelo_dbscan$cluster,
+      levels = sort(unique(modelo_dbscan$cluster))
+    )
+  )
+
+muestra_dbscan |>
+  count(cluster_dbscan) |>
+  mutate(
+    tipo = if_else(cluster_dbscan == "0", "Ruido", "Clúster"),
+    porcentaje = n / sum(n)
+  )
+```
+
+```{r}
+muestra_dbscan |>
+  ggplot(aes(x = edad, y = ingresos, color = cluster_dbscan)) +
+  geom_jitter(alpha = 0.45, width = 0.25, height = 0.12) +
+  scale_color_paletteer_d("ggthemes::Tableau_20") +
+  labs(
+    title = "Resultados DBSCAN",
+    subtitle = "El clúster 0 corresponde a puntos clasificados como ruido",
+    x = "Edad",
+    y = "Número de ingresos",
+    color = "Grupo"
+  ) +
+  tema_sesion()
+```
+
+DBSCAN es útil cuando esperamos grupos por densidad y casos atípicos. En cambio, k-means fuerza a que todos los casos pertenezcan a algún clúster.
+
+## PAM con variables mixtas
+
+¿Qué hacemos si queremos combinar variables numéricas y categóricas?
+
+```{r}
+set.seed(123)
+muestra_pam <- datos_cluster |>
+  mutate(
+    sexo = factor(sexo),
+    delito_generico = fct_lump_n(factor(delito_generico), n = 6),
+    situacion_juridica = factor(situacion_juridica)
+  ) |>
+  slice_sample(n = min(2500, nrow(datos_cluster))) |>
+  select(edad, ingresos, sexo, delito_generico, situacion_juridica)
+
+distancia_gower <- daisy(muestra_pam, metric = "gower")
+modelo_pam <- pam(distancia_gower, k = 4)
+
+datos_pam <- muestra_pam |>
+  mutate(cluster_pam = factor(modelo_pam$clustering))
+
+tibble(
+  cluster_pam = factor(seq_along(modelo_pam$id.med)),
+  observacion_medoide = modelo_pam$id.med,
+  personas = as.integer(modelo_pam$clusinfo[, "size"]),
+  diametro = modelo_pam$clusinfo[, "diameter"],
+  separacion = modelo_pam$clusinfo[, "separation"]
+)
+```
+
+La distancia de Gower permite combinar variables numéricas y categóricas. Por eso PAM es una buena alternativa cuando el perfil no depende solo de edad e ingresos.
+
+```{r}
+perfil_pam <- datos_pam |>
+  group_by(cluster_pam) |>
+  summarise(
+    personas = n(),
+    edad_promedio = mean(edad, na.rm = TRUE),
+    ingresos_promedio = mean(ingresos, na.rm = TRUE),
+    sexo_mas_frecuente = names(sort(table(sexo), decreasing = TRUE))[1],
+    delito_mas_frecuente = names(sort(table(delito_generico), decreasing = TRUE))[1],
+    situacion_mas_frecuente = names(sort(table(situacion_juridica), decreasing = TRUE))[1],
+    .groups = "drop"
+  )
+
+perfil_pam
+```
+
+La tabla permite leer cada clúster como un perfil: combina edad, ingresos, sexo, delito y situación jurídica. Conviene nombrar los grupos a partir de esos rasgos dominantes y revisar si las diferencias son claras antes de usar los perfiles en una interpretación sustantiva.
+
+## Comparar métodos
+
+¿Qué método usaríamos según la pregunta?
+
+| Método | Tipo de variables | Pregunta que responde mejor | Cuidado principal |
+|------------------|------------------|------------------|------------------|
+| K-means | Numéricas escaladas | ¿Qué grupos aparecen si todos los casos deben pertenecer a un clúster? | Requiere elegir `k`; sensible a escala y valores atípicos. |
+| Jerárquico | Numéricas escaladas o distancias | ¿Cómo se van uniendo los casos según similitud? | Costoso con bases grandes; depende del método de enlace. |
+| DBSCAN | Numéricas escaladas | ¿Hay zonas densas y casos de ruido? | Sensible a `eps` y `minPts`. |
+| PAM + Gower | Variables mixtas | ¿Qué perfiles aparecen usando numéricas y categóricas? | Puede ser costoso; conviene trabajar con muestras o bases medianas. |
+
+La elección del método depende de la pregunta, el tipo de variables, el tamaño de la base y la facilidad para explicar los resultados a una audiencia no técnica.
+
+## Ejercicios para seguir practicando
+
+1.  Repite k-means con `k = 3` y `k = 5`. ¿Cambian mucho los perfiles?
+2.  Incluye otra variable numérica o transforma edad en grupos. ¿Qué se gana y qué se pierde?
+3.  Cambia el valor de `eps` en DBSCAN y observa cuántos casos pasan a ruido.
+4.  Usa PAM con otro conjunto de variables categóricas.
+5.  Exporta la base con clústeres y calcula qué delitos predominan en cada grupo.
+
+Estos ejercicios pueden apoyarse en el Posit Assistant de RStudio para revisar errores, pedir explicaciones de funciones y proponer mejoras al código.
